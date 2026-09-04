@@ -1,78 +1,26 @@
-from loguru import logger
+"""Lifecycle (M03) — startup/shutdown wiring of the whole runtime."""
+from __future__ import annotations
 
-from app.core.runtime.models import (
-    TaskStatus
-)
+import logging
 
-from app.core.runtime.persistence import (
-    task_persistence
-)
+from app.core.brain.brain import brain
+from app.core.runtime.task_executor import task_executor
+from app.core.runtime.task_queue import task_queue
+from app.services.tools.registry import tool_registry
 
-
-class Lifecycle:
-
-    def start(
-        self,
-        task
-    ):
-
-        task.status = (
-            TaskStatus.RUNNING
-        )
-
-        task_persistence.save(
-            task
-        )
-
-        logger.info(
-            f"Task Started: {task.id}"
-        )
-
-    def complete(
-        self,
-        task,
-        result
-    ):
-
-        task.status = (
-            TaskStatus.COMPLETED
-        )
-
-        task.result = str(
-            result
-        )
-
-        task_persistence.save(
-            task
-        )
-
-        logger.info(
-            f"Task Completed: {task.id}"
-        )
-
-    def fail(
-        self,
-        task,
-        error=None
-    ):
-
-        task.status = (
-            TaskStatus.FAILED
-        )
-
-        if error:
-
-            task.result = str(
-                error
-            )
-
-        task_persistence.save(
-            task
-        )
-
-        logger.error(
-            f"Task Failed: {task.id}"
-        )
+log = logging.getLogger("runtime.lifecycle")
 
 
-lifecycle = Lifecycle()
+async def startup() -> None:
+    """Wire everything together (avoids circular imports) and start the queue."""
+    from app.core.memory.manager import memory
+
+    brain.wire(memory=memory, tools_executor=tool_registry)
+    task_queue.wire(task_executor)
+    task_queue.start()
+    log.info("runtime started — brain wired, queue running")
+
+
+async def shutdown() -> None:
+    await task_queue.stop()
+    log.info("runtime stopped")

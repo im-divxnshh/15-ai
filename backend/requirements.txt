@@ -1,0 +1,12 @@
+fastapi
+uvicorn[standard]
+pydantic
+pydantic-settings
+python-dotenv
+openai>=1.40
+httpx
+python-socketio
+firebase-admin
+asyncpg
+pypdf
+boto3

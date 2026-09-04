@@ -1,0 +1,63 @@
+{
+  "7951afd1-c2de-4641-9220-4b203d8384b3": {
+    "actor": "user",
+    "action": "chat",
+    "detail": {
+      "agent": "jarvis",
+      "intent": "chat"
+    },
+    "created_at": "2026-09-04T19:20:22.820867+00:00"
+  },
+  "f0a586c2-5b9e-4ba7-aa2e-5d14583d5d1e": {
+    "actor": "user",
+    "action": "chat",
+    "detail": {
+      "agent": "jarvis",
+      "intent": "chat"
+    },
+    "created_at": "2026-09-04T19:20:38.116863+00:00"
+  },
+  "2c892ac0-f723-4305-a72b-d30c0cf54c84": {
+    "actor": "user",
+    "action": "voice_stt",
+    "detail": {
+      "chars": 20
+    },
+    "created_at": "2026-09-04T19:24:04.142999+00:00"
+  },
+  "b3224f8c-9caa-418e-80e3-3a83c5d7a6b3": {
+    "actor": "user",
+    "action": "chat",
+    "detail": {
+      "agent": "jarvis",
+      "intent": "chat"
+    },
+    "created_at": "2026-09-04T19:24:05.126651+00:00"
+  },
+  "9ee73ab8-e5f3-41a5-b04d-c1c16eaa2593": {
+    "actor": "user",
+    "action": "voice_stt",
+    "detail": {
+      "chars": 34
+    },
+    "created_at": "2026-09-04T19:24:13.001123+00:00"
+  },
+  "eb4d6d9a-4d0b-4a59-a97c-e8def669839c": {
+    "actor": "user",
+    "action": "chat",
+    "detail": {
+      "agent": "jarvis",
+      "intent": "chat"
+    },
+    "created_at": "2026-09-04T19:24:14.015342+00:00"
+  },
+  "be8346ca-3c2f-4fd6-a814-3feb38c44646": {
+    "actor": "user",
+    "action": "chat",
+    "detail": {
+      "agent": "jarvis",
+      "intent": "chat"
+    },
+    "created_at": "2026-09-04T19:31:58.940205+00:00"
+  }
+}

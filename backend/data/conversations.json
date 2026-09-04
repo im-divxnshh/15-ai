@@ -1,0 +1,62 @@
+{
+  "a72aff67-1b7e-4df9-bc07-82b62bcb6355": {
+    "role": "user",
+    "text": "hello jarvis, kaise ho yaar?",
+    "agent": "jarvis",
+    "created_at": "2026-09-04T19:20:22.816558+00:00"
+  },
+  "663b7bde-0f51-4374-8119-ad8ddb806c02": {
+    "role": "jarvis",
+    "text": "⚠️ Brain se connect nahi ho paya — LLM error aa gaya. Thodi der baad try karo. 🙏",
+    "agent": "jarvis",
+    "created_at": "2026-09-04T19:20:22.817271+00:00"
+  },
+  "25eb0970-0580-4d8a-a340-d552a4d437a1": {
+    "role": "user",
+    "text": "hi",
+    "agent": "jarvis",
+    "created_at": "2026-09-04T19:20:38.112668+00:00"
+  },
+  "da79c0e4-fc5e-4146-b73f-1cfabed5dd0b": {
+    "role": "jarvis",
+    "text": "⚠️ Brain se connect nahi ho paya — LLM error aa gaya. Thodi der baad try karo. 🙏",
+    "agent": "jarvis",
+    "created_at": "2026-09-04T19:20:38.113993+00:00"
+  },
+  "321dece2-9e95-4442-bbbe-20d0649ea7ce": {
+    "role": "user",
+    "text": " Hello, how are you?",
+    "agent": "jarvis",
+    "created_at": "2026-09-04T19:24:05.123555+00:00"
+  },
+  "f3998dcb-f655-484a-bff6-7b9785a542c4": {
+    "role": "jarvis",
+    "text": "⚠️ Brain se connect nahi ho paya — LLM error aa gaya. Thodi der baad try karo. 🙏",
+    "agent": "jarvis",
+    "created_at": "2026-09-04T19:24:05.124314+00:00"
+  },
+  "b8a42b18-9d2d-4106-990a-88ba9f3b03b4": {
+    "role": "user",
+    "text": " लूप खोरो और सर्च कोरो पैरी मिनादी",
+    "agent": "jarvis",
+    "created_at": "2026-09-04T19:24:14.012185+00:00"
+  },
+  "072a71ff-1e65-47d3-9d08-14df4903a537": {
+    "role": "jarvis",
+    "text": "⚠️ Brain se connect nahi ho paya — LLM error aa gaya. Thodi der baad try karo. 🙏",
+    "agent": "jarvis",
+    "created_at": "2026-09-04T19:24:14.013029+00:00"
+  },
+  "b3109b60-f802-49b0-b41b-d1e595349782": {
+    "role": "user",
+    "text": "hello jarvis, kaise ho yaar?",
+    "agent": "jarvis",
+    "created_at": "2026-09-04T19:31:58.936501+00:00"
+  },
+  "0c4c02e7-c0ff-42d1-b17c-8bd0a4d79e89": {
+    "role": "jarvis",
+    "text": "⚠️ Brain se connect nahi ho paya — LLM error aa gaya. Thodi der baad try karo. 🙏",
+    "agent": "jarvis",
+    "created_at": "2026-09-04T19:31:58.938048+00:00"
+  }
+}

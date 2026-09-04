@@ -1,108 +1,65 @@
-class IntentClassifier:
+"""Classifier — what does the user want, in which language, how urgent?"""
+from __future__ import annotations
 
-    def classify(
-        self,
-        message: str
-    ):
+import logging
 
-        msg = message.lower().strip()
+from app.core.brain.llm_router import llm_router
+from app.core.brain.models import Classification, Intent, Priority
+from app.core.brain.prompts import CLASSIFY_PROMPT
 
-        greetings = [
-            "hi",
-            "hello",
-            "hey",
-            "yo",
-            "good morning",
-            "good afternoon",
-            "good evening"
-        ]
+log = logging.getLogger("brain.classifier")
 
-        technical_words = [
-            "code",
-            "api",
-            "backend",
-            "frontend",
-            "database",
-            "software",
-            "python",
-            "javascript",
-            "react",
-            "nextjs",
-            "fastapi",
-            "bug",
-            "error",
-            "fix"
-        ]
-
-        business_words = [
-            "startup",
-            "market",
-            "pricing",
-            "revenue",
-            "sales",
-            "customer",
-            "business"
-        ]
-
-        planning_words = [
-            "plan",
-            "roadmap",
-            "strategy",
-            "architecture",
-            "design",
-            "build",
-            "create",
-            "develop"
-        ]
-
-        analysis_words = [
-            "analyze",
-            "review",
-            "audit",
-            "evaluate",
-            "compare"
-        ]
-
-        chat_words = [
-            "how are you",
-            "what can you do",
-            "who are you"
-        ]
-
-        if msg in greetings:
-            return "greeting"
-
-        if any(
-            word in msg
-            for word in chat_words
-        ):
-            return "chat"
-
-        if any(
-            word in msg
-            for word in technical_words
-        ):
-            return "technical"
-
-        if any(
-            word in msg
-            for word in business_words
-        ):
-            return "business"
-
-        if any(
-            word in msg
-            for word in planning_words
-        ):
-            return "planning"
-
-        if any(
-            word in msg
-            for word in analysis_words
-        ):
-            return "analysis"
-
-        return "general"
+# Cheap keyword pre-filter — skips an LLM call for obvious cases.
+_HINGLISH_WORDS = {
+    "kya", "kaise", "kaisa", "hai", "hain", "nahi", "nahin", "haan", "yaar", "bhai",
+    "kar", "karo", "karna", "karde", "mera", "meri", "tum", "aap", "mujhe", "bata",
+    "batao", "acha", "thik", "theek", "chalo", "matlab", "bhai", "didi", "boss",
+}
+_TASK_WORDS = {
+    "remind", "reminder", "schedule", "book", "create", "make", "build", "write",
+    "research", "find", "search", "prepare", "plan", "setup", "set up", "send",
+    "yaad", "dila", "bana", "likh", "dhundh", "kraudh", "cron", "automate",
+}
 
 
-classifier = IntentClassifier()
+def quick_classify(text: str) -> Classification | None:
+    t = text.lower().strip()
+    if not t:
+        return None
+    words = set(t.split())
+    hinglish_hits = len(words & _HINGLISH_WORDS)
+    task_hits = sum(1 for w in _TASK_WORDS if w in t)
+    language = "hinglish" if hinglish_hits and any(c.isascii() for c in t) else ("hindi" if hinglish_hits else "english")
+    if task_hits >= 1 and len(t.split()) > 2:
+        return Classification(intent=Intent.TASK, language=language, urgency=Priority.NORMAL, confidence=0.6)
+    return None
+
+
+class Classifier:
+    async def classify(self, text: str) -> Classification:
+        quick = quick_classify(text)
+        if quick and quick.confidence >= 0.6 and len(text) < 25:
+            return quick
+
+        data = await llm_router.chat_json(
+            [
+                {"role": "system", "content": CLASSIFY_PROMPT},
+                {"role": "user", "content": text},
+            ],
+            temperature=0.0,
+            max_tokens=200,
+        )
+        try:
+            return Classification(
+                intent=Intent(data.get("intent", "chat")),
+                language=data.get("language", "english"),
+                sentiment=data.get("sentiment", "neutral"),
+                urgency=Priority(int(data.get("urgency", 1))),
+                confidence=float(data.get("confidence", 0.7)),
+            )
+        except Exception:  # noqa: BLE001
+            log.exception("classifier parse failed, falling back")
+            return quick or Classification(language="english")
+
+
+classifier = Classifier()
