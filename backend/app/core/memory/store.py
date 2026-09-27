@@ -71,13 +71,15 @@ class FirestoreStore:
 
         creds_dict = settings.firebase_credentials_dict()
         if creds_dict:
-            cred = credentials.Certificate(creds_dict)
-            self.db = firestore.Client(project=settings.firebase_project_id or None, credentials=cred)
-        elif settings.firebase_project_id:
-            cred = credentials.ApplicationDefault()
-            self.db = firestore.Client(project=settings.firebase_project_id)
+            if not firebase_admin._apps:
+                cred = credentials.Certificate(creds_dict)
+                firebase_admin.initialize_app(cred, {"projectId": settings.firebase_project_id or None})
+            self.db = firestore.client()
+        elif settings.firebase_project_id and not firebase_admin._apps:
+            firebase_admin.initialize_app(options={"projectId": settings.firebase_project_id})
+            self.db = firestore.client()
         else:
-            raise RuntimeError("Firebase not configured")
+            self.db = firestore.client()
         log.info("Firestore store ready")
 
     def put(self, collection: str, doc_id: str, data: dict[str, Any]) -> None:

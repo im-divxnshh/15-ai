@@ -12,23 +12,67 @@ interface ChatPanelProps {
   onFile: (file: File) => void;
 }
 
-/** Pick an Indian voice for TTS — Hinglish text reads best with en-IN/hi-IN. */
+/** Pick a FEMALE Indian voice for TTS — Hinglish text reads best with hi-IN/en-IN. */
+function pickFemaleVoice(isDevanagari: boolean): SpeechSynthesisVoice | null {
+  const voices = window.speechSynthesis.getVoices();
+  if (!voices.length) return null;
+  const lang = isDevanagari ? "hi-IN" : "en-IN";
+  const femaleHints = /(female|woman|swara|kalpana|heera|neerja|isha|veena|raveena|ananya|priya|aditi|lekha|rita|samantha|karen|serena|zira|google.*female)/i;
+  // best: female voice matching the exact language
+  const exact = voices.filter((v) => v.lang.replace("_", "-") === lang);
+  const exactFemale = exact.find((v) => femaleHints.test(v.name));
+  if (exactFemale) return exactFemale;
+  // next: any female hi / en-IN voice
+  const indian = voices.filter((v) => v.lang.startsWith("hi") || v.lang.replace("_", "-") === "en-IN");
+  const indianFemale = indian.find((v) => femaleHints.test(v.name));
+  if (indianFemale) return indianFemale;
+  // then any female English voice
+  const englishFemale = voices.find((v) => v.lang.startsWith("en") && femaleHints.test(v.name));
+  if (englishFemale) return englishFemale;
+  // last resort: exact language match, or any hi/en-IN voice
+  return exact[0] ?? indian[0] ?? voices.find((v) => v.lang.startsWith("en")) ?? null;
+}
+
+/** Clean text for SPEAKING: remove emojis, markdown, symbols — only speakable words remain. */
+function cleanForSpeech(text: string): string {
+  return (
+    text
+      // remove emoji + pictographs + symbols (so TTS never says "face with tears of joy")
+      .replace(
+        /[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}\u{200D}\u{2B00}-\u{2BFF}\u{1F1E6}-\u{1F1FF}]/gu,
+        " "
+      )
+      // markdown
+      .replace(/\[(.*?)\]\(.*?\)/g, "$1")
+      .replace(/[*_#`~]/g, " ")
+      // filler marks → natural pauses
+      .replace(/[—–]/g, ", ")
+      .replace(/\.\.\./g, ", ")
+      .replace(/\s*,\s*,+/g, ", ")
+      // collapse whitespace
+      .replace(/\s+/g, " ")
+      .trim()
+  );
+}
+
 function speak(text: string) {
   if (typeof window === "undefined" || !window.speechSynthesis) return;
-  const clean = text.replace(/[*_#`>]/g, "").replace(/\[(.*?)\]\(.*?\)/g, "$1");
-  const utter = new SpeechSynthesisUtterance(clean.slice(0, 600));
+  const clean = cleanForSpeech(text);
+  if (!clean) return;
   const isDevanagari = /[ऀ-ॿ]/.test(clean);
-  utter.lang = isDevanagari ? "hi-IN" : "en-IN";
-  const voices = window.speechSynthesis.getVoices();
-  const pick =
-    voices.find((v) => v.lang === utter.lang) ||
-    voices.find((v) => v.lang.startsWith(isDevanagari ? "hi" : "en-IN")) ||
-    voices.find((v) => v.lang.startsWith("en"));
-  if (pick) utter.voice = pick;
-  utter.rate = 1;
-  utter.pitch = 1;
+  // split into sentence-ish chunks — each spoken as its own utterance,
+  // sounds like a person pausing between thoughts instead of one long rush
+  const chunks = clean.match(/[^.!?।]+[.!?।]?/g)?.slice(0, 12) ?? [clean];
+  const voice = pickFemaleVoice(isDevanagari);
   window.speechSynthesis.cancel();
-  window.speechSynthesis.speak(utter);
+  for (const chunk of chunks) {
+    const utter = new SpeechSynthesisUtterance(chunk.trim());
+    if (voice) utter.voice = voice;
+    utter.lang = voice?.lang ?? (isDevanagari ? "hi-IN" : "en-IN");
+    utter.rate = 0.94;   // slightly unhurried — natural Indian English pace
+    utter.pitch = 1.15;  // a touch higher → clearly female
+    window.speechSynthesis.speak(utter);
+  }
 }
 
 export default function ChatPanel({
@@ -54,9 +98,23 @@ export default function ChatPanel({
   useEffect(() => {
     if (!tts || messages.length === 0) return;
     const last = messages[messages.length - 1];
-    if (last.role === "jarvis") speak(last.text);
+    if (last.role !== "jarvis") return;
+    if (typeof window !== "undefined" && window.speechSynthesis) {
+      // voices load async — warm the list so pickFemaleVoice has voices to choose from
+      window.speechSynthesis.getVoices();
+    }
+    speak(last.text);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messages.length]);
+
+  // keep the voices list warm as it loads (Chrome fires this once voices arrive)
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.speechSynthesis) return;
+    const warm = () => window.speechSynthesis.getVoices();
+    warm();
+    window.speechSynthesis.addEventListener("voiceschanged", warm);
+    return () => window.speechSynthesis.removeEventListener("voiceschanged", warm);
+  }, []);
 
   const send = () => {
     const text = input.trim();

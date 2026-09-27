@@ -1,16 +1,15 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import AgentDesk, { CommandPod } from "@/components/office/AgentDesk";
+import { CommandPod, PodRings, WorkStation } from "@/components/office/AgentDesk";
 import ChatPanel from "@/components/office/ChatPanel";
 import FeedPanel from "@/components/office/FeedPanel";
 import { api } from "@/lib/api";
 import { getSocket } from "@/lib/socket";
 import type { AgentInfo, Analytics, ChatMessage, HealthInfo, OfficeEvent } from "@/lib/types";
 
-const TILE = 78;
-const GRID = 10;
-const FLOOR = TILE * GRID;
+const TILE = 88;
+const GRID = 9;
 
 let msgCounter = 0;
 const nextMsgId = () => `m${++msgCounter}`;
@@ -194,10 +193,10 @@ export default function Office() {
         <div className="flex items-center gap-2.5">
           <span className="text-xl">🧠</span>
           <div>
-            <div className="text-sm font-black tracking-widest text-cyan-300 neon-text">
+            <div className="pixel-font text-[10px] tracking-widest text-cyan-300 neon-text">
               15-AI · JARVIS OFFICE
             </div>
-            <div className="text-[10px] tracking-wider text-slate-500">
+            <div className="pixel-font mt-1 text-[7px] tracking-wider text-slate-500">
               build for comfort · 15 agents · ek mission
             </div>
           </div>
@@ -243,70 +242,68 @@ export default function Office() {
           <FeedPanel events={events} />
         </aside>
 
-        {/* center: the office */}
+        {/* center: the pixel office */}
         <main className="office-stage relative min-w-0 flex-1">
           <div className="office-aurora" />
-          <div
-            className="world"
-            style={{
-              width: 0,
-              height: 0,
-              transform: `translate(-50%, -50%) rotateX(55deg) rotateZ(45deg) scale(${zoom})`,
-            }}
-          >
-            {/* floor base */}
-            <div className="floor" style={{ width: FLOOR, height: FLOOR, left: 0, top: 0 }} />
+          <div className="scene-center">
+            <div
+              className="floor-pixel"
+              style={{
+                width: TILE * GRID,
+                height: TILE * GRID,
+                transform: `scale(${zoom})`,
+                transition: "transform 0.25s steps(6)",
+              }}
+            >
+              {/* rainbow pixel floor tiles */}
+              {Array.from({ length: GRID }, (_, gx) =>
+                Array.from({ length: GRID }, (_, gy) => (
+                  <div
+                    key={`t-${gx}-${gy}`}
+                    className={`tile-pixel${(gx + gy) % 2 ? " alt" : ""}`}
+                    style={{
+                      width: TILE,
+                      height: TILE,
+                      left: gx * TILE,
+                      top: gy * TILE,
+                      ["--hue" as string]: ((gx * 40 + gy * 25) % 360),
+                    }}
+                  />
+                ))
+              )}
 
-            {/* rainbow floor tiles */}
-            {Array.from({ length: GRID }, (_, gx) =>
-              Array.from({ length: GRID }, (_, gy) => (
+              {/* corner lamps */}
+              {[
+                [0, 0],
+                [GRID - 1, 0],
+                [0, GRID - 1],
+                [GRID - 1, GRID - 1],
+              ].map(([gx, gy], i) => (
                 <div
-                  key={`t-${gx}-${gy}`}
-                  className="tile"
+                  key={`lamp-${i}`}
+                  className="px-lamp"
                   style={{
-                    width: TILE,
-                    height: TILE,
-                    left: gx * TILE,
-                    top: gy * TILE,
-                    ["--hue" as string]: ((gx + gy) * 36) % 360,
+                    left: gx * TILE + TILE / 2,
+                    top: gy * TILE + TILE / 2,
+                    ["--hue" as string]: i * 90,
                   }}
                 />
-              ))
-            )}
+              ))}
 
-            {/* corner light pillars */}
-            {[
-              [0, 0],
-              [GRID - 1, 0],
-              [0, GRID - 1],
-              [GRID - 1, GRID - 1],
-            ].map(([gx, gy], i) => (
-              <div
-                key={i}
-                className="sprite"
-                style={{ left: (gx + 1) * TILE, top: (gy + 1) * TILE }}
-              >
-                <div style={{ fontSize: 22, filter: "drop-shadow(0 0 12px #22d3ee)" }}>🗼</div>
-              </div>
-            ))}
+              {/* JARVIS command pod */}
+              {jarvis && <PodRings gx={jarvis.desk[0]} gy={jarvis.desk[1]} />}
+              {jarvis && <CommandPod agent={jarvis} onClick={() => setSelectedId(null)} />}
 
-            {/* JARVIS command pod */}
-            {jarvis && (
-              <CommandPod
-                agent={jarvis}
-                onClick={() => setSelectedId(null)}
-              />
-            )}
-
-            {/* agent desks */}
-            {workers.map((a) => (
-              <AgentDesk
-                key={a.id}
-                agent={a}
-                selected={selectedId === a.id}
-                onClick={(agent) => setSelectedId(agent.id)}
-              />
-            ))}
+              {/* agent workstations */}
+              {workers.map((a) => (
+                <WorkStation
+                  key={a.id}
+                  agent={a}
+                  selected={selectedId === a.id}
+                  onClick={(agent) => setSelectedId(agent.id)}
+                />
+              ))}
+            </div>
           </div>
 
           {/* zoom controls */}

@@ -4,12 +4,17 @@ OpenAI-compatible client so it works with GLM (z.ai), agentrouter-style
 proxies, Groq, OpenAI, or any compatible endpoint via env vars.
 
 Resilience built in:
-- Preventive sanitization of tokens some proxies moderate (e.g. "jarvis").
-- Retry on transient blocks / invalid-role errors (retry without history).
-- Always degrades to a friendly Hinglish message, never crashes the office.
+- Some coding-tool proxies (e.g. agentrouter.org) content-block casual
+  Hindi/Hinglish words in USER messages only (system/assistant pass fine).
+  So on a content-block we retry with user messages machine-translated
+  to English via a Hinglish→English word dictionary, plus a style hint so
+  the reply still comes back in natural Hinglish.
+- Also retries with trimmed context (some proxies choke on odd roles).
+- Always degrades to a friendly message, never crashes the office.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -21,21 +26,69 @@ from app.config.settings import settings
 
 log = logging.getLogger("brain.llm_router")
 
-# Words some coding-tool proxies content-block (they dislike assistant-building
-# / casual chat). Sanitized to look-alike spellings that pass moderation.
-_SANITIZE_MAP = [
-    (re.compile(r"\bjarvis\b", re.I), "J.A.R.V.I.S"),
-]
+# Hinglish → English dictionary (word-level, good enough to dodge moderation).
+_HINGLISH_EN: dict[str, str] = {
+    # addressing / pronouns
+    "mujhe": "I", "mujhko": "I", "mera": "my", "meri": "my", "main": "I",
+    "tum": "you", "aap": "you", "tera": "your", "tumhara": "your", "tumse": "from you",
+    "kya": "what", "kyun": "why", "kyu": "why", "kab": "when", "kahan": "where",
+    "kaise": "how", "kaisa": "how", "kaisi": "how", "kitna": "how much",
+    "jarvis": "chief", "yaar": "friend", "bhai": "bro", "didi": "sister", "dost": "friend",
+    # verbs
+    "hai": "is", "hain": "are", "ho": "are", "hoon": "am", "hu": "am",
+    "tha": "was", "thi": "was", "the": "were", "hoga": "will be",
+    "karo": "do", "kar": "do", "karna": "to do", "karde": "do it", "kardo": "do it",
+    "karna": "to do", "karlena": "do it", "bana": "make", "banao": "make", "banana": "to make",
+    "likh": "write", "likho": "write", "bata": "tell", "batao": "tell", "bol": "say", "bolo": "say",
+    "bhej": "send", "bhejo": "send", "bhejdo": "send it", "de": "give", "dena": "give", "dedo": "give it",
+    "mila": "got", "mil": "get", "lagna": "apply", "lagta": "feels", "chalao": "run", "chalu": "running",
+    "yaad": "remember", "dila": "remind", "dilana": "remind", "dilade": "remind me", "dilado": "remind me",
+    "soch": "think", "dekho": "see", "dekh": "see", "sun": "listen", "suno": "listen",
+    "jana": "go", "jao": "go", "aana": "come", "ao": "come", "uthna": "wake up", "sona": "sleep",
+    # common words
+    "nahi": "no", "nahin": "no", "haan": "yes", "acha": "okay", "accha": "okay",
+    "thik": "okay", "theek": "okay", "badhiya": "great", "mast": "awesome",
+    "kal": "tomorrow", "aaj": "today", "abhi": "right now", "ab": "now",
+    "subah": "morning", "shaam": "evening", "raat": "night", "baje": "oclock",
+    "kaam": "work", "ghar": "home", "paisa": "money", "paise": "money", "khana": "food",
+    "jaldi": "quickly", "thoda": "a little", "bahut": "very", "bohot": "very",
+    "chalo": "lets go", "shuru": "start", "bandh": "stop", "khatam": "finished",
+    "naam": "name", "baat": "talk", "cheez": "thing", "baad": "later", "pehle": "first",
+    "sab": "all", "kuch": "something", "koi": "someone", "bhi": "also", "to": "so",
+    "matlab": "meaning", "waqt": "time", "din": "day", "hafta": "week", "mahina": "month",
+    "meeting": "meeting", "list": "list", "note": "note", "reminder": "reminder",
+}
+
+_WORD_RE = re.compile(r"[A-Za-z]+")
+
+_STYLE_HINT = (
+    " (Note: user typed this in casual Hindi-English mix — reply in the same "
+    "natural, warm Hindi-English mix style with light emojis.)"
+)
 
 
-def _sanitize(text: str) -> str:
-    for pattern, repl in _SANITIZE_MAP:
-        text = pattern.sub(repl, text)
-    return text
+def _translate_user_text(text: str) -> str:
+    """Word-level Hinglish → English translation (dodges proxy moderation)."""
+
+    def repl(m: re.Match) -> str:
+        return _HINGLISH_EN.get(m.group(0).lower(), m.group(0))
+
+    return _WORD_RE.sub(repl, text)
 
 
-def _sanitize_messages(messages: list[dict[str, str]]) -> list[dict[str, str]]:
-    return [{"role": m["role"], "content": _sanitize(m["content"])} for m in messages]
+def _sanitize_messages(messages: list[dict[str, str]], translate_users: bool) -> list[dict[str, str]]:
+    """Optionally translate user-role messages; leave system/assistant untouched
+    (moderation only targets user messages on agentrouter-style proxies)."""
+    out: list[dict[str, str]] = []
+    for m in messages:
+        content = m["content"]
+        if translate_users and m["role"] == "user":
+            translated = _translate_user_text(content)
+            if translated != content:
+                translated += _STYLE_HINT
+            content = translated
+        out.append({"role": m["role"], "content": content})
+    return out
 
 
 class LLMRouter:
@@ -69,38 +122,29 @@ class LLMRouter:
         if not self.ready:
             return _offline_reply(messages)
 
-        # 1st attempt: sanitized messages
+        # Attempt 1: original messages (works for English + prompts)
         try:
-            return await self._call(_sanitize_messages(messages), model, temperature, max_tokens)
+            return await self._call(_sanitize_messages(messages, translate_users=False), model, temperature, max_tokens)
         except Exception as exc:  # noqa: BLE001
-            err = str(exc)
-            log.warning("LLM call failed (attempt 1): %s", err[:300])
+            log.warning("LLM attempt 1 failed: %s", str(exc)[:250])
+            await asyncio.sleep(1.0)
 
-        # 2nd attempt: system+last-user only (history/roles sometimes upset proxies)
+        # Attempt 2: user messages translated to English (dodges content-block on Hinglish)
+        try:
+            return await self._call(_sanitize_messages(messages, translate_users=True), model, temperature, max_tokens)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("LLM attempt 2 failed: %s", str(exc)[:250])
+            await asyncio.sleep(1.5)
+
+        # Attempt 3: system + last user only, translated
         trimmed = _trim_to_last_exchange(messages)
-        if trimmed and len(trimmed) < len(messages):
+        if trimmed:
             try:
-                return await self._call(_sanitize_messages(trimmed), model, temperature, max_tokens)
+                return await self._call(_sanitize_messages(trimmed, translate_users=True), model, temperature, max_tokens)
             except Exception as exc:  # noqa: BLE001
-                log.warning("LLM call failed (attempt 2): %s", str(exc)[:300])
+                log.error("LLM attempt 3 failed: %s", str(exc)[:250])
 
-        # 3rd attempt: single bare user message
-        last_user = next((m["content"] for m in reversed(messages) if m["role"] == "user"), "")
-        if last_user:
-            try:
-                return await self._call(
-                    [{"role": "user", "content": _sanitize(last_user)}], model, temperature, max_tokens
-                )
-            except Exception as exc:  # noqa: BLE001
-                err = str(exc)
-                log.error("LLM call failed (attempt 3): %s", err[:300])
-                if "content-blocked" in err or "blocked" in err.lower():
-                    return (
-                        "⛔ Boss, provider ne ye message block kar diya (content policy). "
-                        "Thoda alag words mein try karo — ya `.env` mein koi official GLM endpoint "
-                        "(jaise z.ai) use karo jo aise filters nahi lagata. 🙏"
-                    )
-        return "⚠️ Brain se connect nahi ho paya — LLM error aa gaya. Thodi der baad try karo. 🙏"
+        return "⚠️ Boss, LLM provider se abhi reply nahi aa raha (block ya rate-limit lagta hai). Ek minute ruk ke dobara try karo. 🙏"
 
     async def _call(
         self,

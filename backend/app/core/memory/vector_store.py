@@ -58,7 +58,11 @@ class NeonVectorStore:
             return
         import asyncpg
 
-        self._pool = await asyncpg.create_pool(settings.neon_url, min_size=1, max_size=5)
+        # statement_cache_size=0 — required for pgbouncer/pooler endpoints
+        # (transaction-mode pooling silently breaks asyncpg prepared statements)
+        self._pool = await asyncpg.create_pool(
+            settings.neon_url, min_size=1, max_size=5, statement_cache_size=0
+        )
         async with self._pool.acquire() as conn:
             await conn.execute("CREATE EXTENSION IF NOT EXISTS vector")
             # figure out real embedding dim from a probe vector
@@ -99,13 +103,18 @@ class NeonVectorStore:
         await self._ensure()
         vec_str = "[" + ",".join(str(v) for v in query_vec) + "]"
         async with self._pool.acquire() as conn:
+            # distance computed ONCE in a subquery — the pooler breaks queries
+            # that bind the same $1 parameter in both SELECT and ORDER BY
             rows = await conn.fetch(
                 """
-                SELECT id, content, kind, agent, created_at,
-                       1 - (embedding <=> $1::vector) AS score
-                FROM memories
-                WHERE ($2::text IS NULL OR kind = $2)
-                ORDER BY embedding <=> $1::vector
+                SELECT id, content, kind, agent, created_at, score
+                FROM (
+                    SELECT id, content, kind, agent, created_at,
+                           1 - (embedding <=> $1::vector) AS score
+                    FROM memories
+                    WHERE ($2::text IS NULL OR kind = $2)
+                ) ranked
+                ORDER BY score DESC
                 LIMIT $3
                 """,
                 vec_str, kind, limit,
