@@ -4,3 +4,4 @@
 .env.*
 *.env.bak*
 .venv/
+backend/data/
