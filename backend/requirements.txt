@@ -1,4 +1,4 @@
-# Active NOVA runtime; legacy modules are not mounted by main.py.
+# Active NOVA runtime.
 fastapi==0.141.1
 uvicorn[standard]==0.54.0
 pydantic==2.13.5

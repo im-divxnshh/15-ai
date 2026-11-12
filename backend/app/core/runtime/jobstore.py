@@ -128,7 +128,8 @@ def events(user_id,workflow_id=None,after=0,limit=500):
         for raw in command('HMGET',key('events:'+owner),*ids[start:start+200]):
             if raw:
                 row=json.loads(raw)
-                if workflow_id is None or row['workflow_id']==workflow_id:
+                # Account events can omit the optional workflow link.
+                if workflow_id is None or row.get('workflow_id')==workflow_id:
                     out.append(row)
                     if len(out)>=limit: return out
     return out

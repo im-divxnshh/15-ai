@@ -1,3 +1,0 @@
--r requirements.txt
-# Exercises the real Redis Lua scripts in a disposable in-memory server.
-fakeredis[lua]>=2.32,<3

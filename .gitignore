@@ -24,6 +24,5 @@ backend/data/
 *.log
 .DS_Store
 
-.progress.lock
 artifacts/
 coverage/

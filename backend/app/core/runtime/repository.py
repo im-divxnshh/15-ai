@@ -32,6 +32,7 @@ def list_for(user,kind,limit=200):
     try:
         rows=[decode(s) for s in collection(user).where(filter=FieldFilter('kind','==',kind)).stream(timeout=10)]
         return sorted(rows,key=lambda r:(r['created_at'],r['id']),reverse=True)[:limit]
+    except db.StorageUnavailable:raise
     except Exception as error: raise db.StorageUnavailable(f'Firestore query unavailable ({type(error).__name__})') from None
 
 def get(user,ident,kind=None):
@@ -39,6 +40,7 @@ def get(user,ident,kind=None):
     try:
         row=collection(user).document(ident).get(timeout=10)
         return decode(row) if row.exists and (kind is None or row.to_dict()['kind']==kind) else None
+    except db.StorageUnavailable:raise
     except Exception as error: raise db.StorageUnavailable(f'Firestore read unavailable ({type(error).__name__})') from None
 
 def delete(user,ident,kind=None):
@@ -61,6 +63,7 @@ def register_schedule_user(user):
     except Exception as error:raise db.StorageUnavailable(f'Firestore scheduler unavailable ({type(error).__name__})') from None
 def schedule_users():
     try:return [s.to_dict()['user_id'] for s in client().collection('nova_schedule_users').stream(timeout=10)]
+    except db.StorageUnavailable:raise
     except Exception as error:raise db.StorageUnavailable(f'Firestore scheduler unavailable ({type(error).__name__})') from None
 def history(user,agent,limit=40):
     rows=[r for r in list_for(user,'message',100000) if r['agent_id']==agent];return list(reversed(rows[:limit]))

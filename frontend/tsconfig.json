@@ -37,9 +37,6 @@
     "**/*.mts"
   ],
   "exclude": [
-    "node_modules",
-    "components/office",
-    "lib/socket.ts",
-    "lib/types.ts"
+    "node_modules"
   ]
 }

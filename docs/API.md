@@ -1,6 +1,6 @@
 # NOVA OS API
 
-**Current readiness:** Redis execution/state/outbox, Firebase user documents, Neon chunk retrieval and private R2 objects are implemented. 54 backend tests pass, including actual Redis Lua and TLS/CORS regressions. Four live access probes and a Groq completion passed; Firebase refresh and SMTP TLS failures still gate live storage and the production build. The standalone office browser passed; full workspace verification awaits its CORS-fix rerun. Private data endpoints require authentication and return HTTP 503 when required storage is unavailable. SQLite fallback is disabled. Public `GET /api/office/roster` exposes only fifteen agent descriptors with unavailable activity; health and `/api/session` remain usable without private storage.
+**Current readiness:** Redis execution/state/outbox, Firebase user documents, Neon chunk retrieval and private R2 objects are implemented. The last full backend suite passed 54 tests; seven new Telegram tests and eleven existing transport tests passed separately after adding the bot. Four live access probes and a Groq completion passed; Firebase JWT-signature rejection and SMTP disconnect still gate readiness. The standalone office browser passed; the latest workspace run passed eight groups and failed at memory persistence. Private data endpoints require authentication and return HTTP 503 when required storage is unavailable. SQLite fallback is disabled. Public `GET /api/office/roster` exposes only fifteen agent descriptors with unavailable activity; health and `/api/session` remain usable without private storage.
 
 The active contract is [openapi.json](openapi.json), generated from `backend/main.py`. Interactive docs are at `http://localhost:8000/docs`. Regenerate with `backend/venv/bin/python backend/scripts/export_openapi.py`.
 
@@ -41,6 +41,8 @@ Repeated `client_key` for the same user returns the existing workflow. Reuse the
 
 Workflow states: `queued`, `running`, `paused`, `completed`, `failed`, `cancelled`, `interrupted`. Additional step states: `waiting_approval`, `skipped`. Browser closure does not stop queued work. On restart, in-flight steps are interrupted and require explicit review/retry. A server cannot undo a tool action already accepted or a command already running.
 
+Each task receives the original mission `instruction` as context alongside its own instruction and dependency results. Include the actual source information in that brief; referring to a description without supplying it does not provide the agents with its contents. A `completed` step records a nonempty agent response with no execution error; it does not independently assess whether the response satisfies the requested deliverable. Review each step's `result`, which may contain a clarification question.
+
 The SSE stream sends persisted IDs and JSON event data, plus a `ready` event and heartbeat comments. Reconnect with the last processed `after` cursor to recover missed events. Use authenticated fetch streaming; never put access tokens in URLs. Event types include routing, collaboration, tool start/completion/failure, approvals, step outcomes, and workflow controls. `/api/events` lists account activity.
 
 ## Agents, data and approvals
@@ -66,7 +68,11 @@ Files: `GET /api/files` lists metadata; `PUT /api/files/{filename}` uploads raw 
 
 Delivery states: `pending`, `sending`, `sent`, `blocked`, `retrying`, `failed`, `interrupted`, `disabled`. Known transient rejections/connection failures have bounded retries. Lost acknowledgements and partial Telegram messages require explicit review; they are not silently replayed. Destination changes block old messages until explicit retry. Restart during sending marks the outcome interrupted. Verification is tied to sender configuration and destination. "Sent" means SMTP/Telegram acceptance, not guaranteed inbox arrival.
 
-SMTP passwords and Telegram tokens are read only from backend environment variables. The token is omitted from transport logs. Bots only deliver to configured chats; calendar, inbox, broker, social publication and music account integrations are not implemented. The agents can draft and reason about these topics using supplied information.
+SMTP passwords and Telegram tokens are read only from backend environment variables. The token is omitted from transport logs. Calendar, inbox, broker, social publication and music account integrations are not implemented. The agents can draft and reason about these topics using supplied information.
+
+`GET /api/telegram/status` returns control-bot configuration/running state for the authenticated bound account, without revealing the token, chat ID or other user's binding. `TELEGRAM_CONTROL_ENABLED=true` enables elected-worker long polling; `TELEGRAM_CONTROL_USER_ID` binds that private chat to an APP_TOKEN `owner` or exact Firebase UID. The setup script validates the bot/chat and existing webhook, installs the command menu and enables Telegram preferences.
+
+Only messages from the configured private chat's matching sender are accepted; group, forwarded and other-user messages cannot submit work. `/task` and plain text queue a workflow using the update ID for idempotency. `/status`, `/tasks`, `/run ID` and `/audit` read scoped records; `/pause`, `/resume`, `/cancel`, `/retry` use the existing workflow controls. System approvals remain in the workspace. Durable claims prevent ambiguous control commands from replaying after a crash. First activation skips pending historical commands. Bot responses use only Telegram even if email is enabled. Regular workflow/reply notifications use the existing preferences; current-task snapshots and activity digests use the `updates` category and batch new event labels about every 15 seconds without raw tool payloads. See [startup and Telegram instructions](RUNNING.md).
 
 ## Errors
 

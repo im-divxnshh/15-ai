@@ -155,8 +155,18 @@ def digest(cfg):
     prior = next(iter(db.records('migrations', id=ident)), None)
     if prior is None:
         recent = db.recent_events(cfg['user'], 1)
-        db.put('migrations', ident, {'id': ident, 'kind': 'telegram_audit_cursor', 'after': recent[0]['id'] if recent else 0})
-        return
+        prior = {'id': ident, 'kind': 'telegram_audit_cursor', 'after': recent[0]['id'] if recent else 0}
+        db.put('migrations', ident, prior)
+    runs = [r for r in db.records('workflows', user_id=cfg['user']) if r['status'] in ('queued', 'running', 'paused', 'interrupted')]
+    active = db.records('activity', user_id=cfg['user'], status='working')
+    body = '\n'.join(sorted(f"{r['title']} — {r['status']}\nID: {r['id']}" for r in runs[:10])) or 'No current tasks.'
+    if active:
+        body += '\n\nWorking now:\n' + '\n'.join(sorted(f"{r['agent_id']}: {r['task']}" for r in active[:15]))
+    fingerprint = hashlib.sha256(body.encode()).hexdigest()
+    if prior.get('status_hash') != fingerprint:
+        revision = prior.get('status_revision', 0) + 1
+        delivery.queue(cfg['user'], 'Current tasks', body, dedupe=f"{ident}:status:{revision}", channels=('telegram',))
+        db.update('migrations', ident, {'status_hash': fingerprint, 'status_revision': revision})
     events = db.events(cfg['user'], after=prior['after'], limit=30)
     if not events:
         return

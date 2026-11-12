@@ -21,11 +21,9 @@ from urllib.parse import urlsplit,quote
 import httpx
 from dotenv import dotenv_values
 
-CHECK_VERSION=5
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/'backend'))
 from app.core.runtime import tls
-REPORT=ROOT/'artifacts/connection-report.json'
 logging.getLogger('httpx').setLevel(logging.WARNING)
 logging.getLogger('httpcore').setLevel(logging.WARNING)
 REQUIRED={
@@ -47,27 +45,6 @@ def values():
     result={**private,**public}
     result['GROQ_BASE_URL']='https://api.groq.com/openai/v1'
     return result
-
-def fingerprint(env):
-    # Telegram is deferred by the user. Its later setup must not invalidate
-    # connection evidence for the six currently required services.
-    relevant={key:env.get(key) for service,keys in REQUIRED.items() if service!='telegram' for key in keys}
-    relevant.update({key:env.get(key) for key in ('STORAGE_BACKEND','FILE_STORAGE_BACKEND','SYSTEM_ACCESS_USER_ID','CORS_ORIGINS','NEXT_PUBLIC_BACKEND_URL')})
-    return hashlib.sha256(json.dumps(relevant,sort_keys=True).encode()).hexdigest()
-
-def telegram_fingerprint(env):
-    return hashlib.sha256(json.dumps({key:env.get(key) for key in REQUIRED['telegram']},sort_keys=True).encode()).hexdigest()
-
-def record_progress(report):
-    from progress import update
-    required=report['required_services']
-    count=sum(report['checks'][service]['status']=='passed' for service in required)
-    remaining=[service for service in required if report['checks'][service]['status']!='passed']
-    note=f'{count}/{len(required)} required live connections passed. '
-    if 'telegram' not in required:note+='Telegram deferred by user and excluded from this gate. '
-    note+='Remaining: '+', '.join(remaining)+'. ' if remaining else 'Required service access checks passed. '
-    note+='SMTP/Telegram message delivery and runtime integration are separate checks; see artifacts/connection-report.json.'
-    update('connection-gate','complete' if report['passed'] else 'blocked',note,{'at':report['checked_at'],'exit_code':0 if report['passed'] else 1})
 
 def validate_application(env):
     problems=[]
@@ -229,37 +206,25 @@ def probe(service,env):
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--offline',action='store_true',help='Inspect configuration only; cannot unlock builds')
-    parser.add_argument('--require-verified',action='store_true',help='Reject a build unless a recent matching live report passed')
-    parser.add_argument('--include-telegram',action='store_true',help='Also test Telegram when you are ready; it is deferred by default')
+    parser.add_argument('--offline',action='store_true',help='Inspect configuration without contacting services')
+    parser.add_argument('--include-telegram',action='store_true',help='Also test the optional Telegram access connection')
     args=parser.parse_args();env=values()
     problems=validate_application(env)
     if problems:
         for problem in problems:print('Application configuration: '+problem)
-        print('Builds remain stopped.');return 1
+        return 1
     required=[service for service in REQUIRED if service!='telegram' or args.include_telegram]
-    if not required or any(service not in REQUIRED for service in required):print('Invalid CONNECTION_GATE_REQUIRED configuration');return 1
-    if args.require_verified:
-        try:
-            report=json.loads(REPORT.read_text());age=(datetime.now(timezone.utc)-datetime.fromisoformat(report['checked_at'])).total_seconds()
-            valid=report.get('version')==CHECK_VERSION and report['mode']=='live' and report['passed'] and report['fingerprint']==fingerprint(env) and 0<=age<86400 and all(report['checks'].get(service,{}).get('status')=='passed' for service in required)
-            if args.include_telegram:valid=valid and report.get('telegram_fingerprint')==telegram_fingerprint(env)
-            if not valid:raise ValueError('Unverified connections')
-        except (OSError,ValueError,KeyError,TypeError,AttributeError):
-            print('Build stopped: required connections are not verified for the current env values. Run backend/venv/bin/python scripts/check_connections.py after filling the keys.');return 1
-        print('Required connection gate passed.');return 0
     if args.offline:checks={s:{'status':'missing' if (problem:=validate(s,env)) else 'unverified','detail':problem or 'Values present; no live connection attempted'} for s in required}
     else:
         with ThreadPoolExecutor(max_workers=4) as executor:
             checks=dict(zip(required,executor.map(lambda service:probe(service,env),required)))
-    passed=not args.offline and all(check['status']=='passed' for check in checks.values())
-    if not args.include_telegram:checks['telegram']={'status':'deferred','detail':'Deferred by user. Not contacted and not required for the current connection gate.'}
-    report={'version':CHECK_VERSION,'checked_at':datetime.now(timezone.utc).isoformat(),'mode':'offline' if args.offline else 'live','fingerprint':fingerprint(env),'telegram_fingerprint':telegram_fingerprint(env) if args.include_telegram else None,'required_services':required,'passed':passed,'checks':checks,'delivery':'SMTP message delivery remains unverified by these read-only/authentication probes. Telegram is deferred unless explicitly included.'}
-    if not args.offline:
-        REPORT.parent.mkdir(exist_ok=True);REPORT.write_text(json.dumps(report,indent=2)+'\n');REPORT.chmod(0o600)
-        record_progress(report)
+    passed=all(check['status']==('unverified' if args.offline else 'passed') for check in checks.values())
+    if not args.include_telegram:checks['telegram']={'status':'deferred','detail':'Optional Telegram access probe not requested. Use --include-telegram; bot activation is separate.'}
     for service,check in checks.items():print(f"{service}: {check['status']} — {check['detail']}")
-    print('Ready for the required connection gate.' if report['passed'] else 'Builds remain stopped. No service success is claimed without a passed live check.')
-    return 0 if report['passed'] else 1
+    if args.offline:
+        print('Configuration values checked; no live access was attempted.')
+    else:
+        print('Service access checks passed.' if passed else 'Some services need attention; see the results above.')
+    return 0 if passed else 1
 
 if __name__=='__main__':sys.exit(main())

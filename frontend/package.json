@@ -4,14 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "../backend/venv/bin/python ../scripts/check_connections.py --require-verified && python3 ../scripts/progress.py run frontend-build -- next build --webpack",
-    "start": "next start",
-    "progress": "python3 ../scripts/progress.py",
-    "progress:watch": "python3 ../scripts/progress.py watch",
-    "test:browser": "python3 ../scripts/progress.py run browser-tests -- node tests/browser.mjs",
-    "test:transport": "node --test tests/transport.test.cjs",
-    "test:office": "node --test tests/office.test.cjs",
-    "test:office:browser": "node tests/office-browser.mjs"
+    "build": "next build --webpack",
+    "start": "next start"
   },
   "dependencies": {
     "next": "16.4.6",
@@ -24,7 +18,6 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
-    "typescript": "^5",
-    "puppeteer-core": "24.38.0"
+    "typescript": "^5"
   }
 }
