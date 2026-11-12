@@ -1,0 +1,18 @@
+{
+  "openapi": "3.0.3",
+  "info": {"title": "Groq completion dependency", "version": "1.0.0", "description": "Subset used by NOVA; sourced from the existing Groq OpenAI-compatible client. Local fixture responses do not establish live provider behavior."},
+  "servers": [{"url": "https://api.groq.com/openai/v1"}],
+  "paths": {
+    "/chat/completions": {"post": {
+      "security": [{"bearerAuth": []}],
+      "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "object", "required": ["model", "messages"], "properties": {"model": {"type": "string"}, "messages": {"type": "array", "items": {"type": "object"}}, "tools": {"type": "array", "items": {"type": "object"}}}}}}},
+      "responses": {
+        "200": {"description": "Assistant content or tool calls", "content": {"application/json": {"example": {"choices": [{"message": {"role": "assistant", "content": "Simulated completion"}}]}}}},
+        "401": {"description": "Invalid credentials"},
+        "429": {"description": "Rate limited"},
+        "503": {"description": "Temporarily unavailable"}
+      }
+    }}
+  },
+  "components": {"securitySchemes": {"bearerAuth": {"type": "http", "scheme": "bearer"}}}
+}

@@ -1,34 +1,47 @@
 # Verification evidence
 
-## Current UI checks
+## Repeatable verification
 
-- TypeScript `--noEmit` passed on the new cabin office and public/authenticated routes.
-- Three office tests passed: all fourteen specialist routes enter the CEO cabin and return without crossing other cabins; walking completion/cancellation/reduced motion; only new agent-start events produce assignment movements, including separate tasks for the same agent.
-- Two existing frontend transport tests passed: SSE authentication/reconnect/cursor handling and visible validation/offline/authentication errors.
-- The standalone office renderer passed: 15 cabins and no fabricated working status. The generated HTML includes persistent themes, cabin detail dialogs, map/list controls and a labelled walking demo.
-- `frontend/tests/office-browser.mjs` attempted Chrome with a file URL and debugging pipe. Chrome closed at `Target.setDiscoverTargets` before any page checks. **Desktop/mobile visual checks and actual browser interactions remain unverified.** No screenshot or browser pass is claimed. The failed report is artifacts/office/report.json.
+`backend/venv/bin/python scripts/verify_all.py` runs the complete verification sequence and records each result in `artifacts/verification/report.json`, `project-progress.json` and generated `PLAN.md`. It installs missing Redis test dependencies, uses an isolated live storage fixture and one bounded Groq completion, runs the saved local Postman simulation and browser checks, and attempts the production build only after the live connection gate passes. It sends no real notifications.
 
-## Configuration and storage
+`--local --only env,backend,office,transport,typescript,render` repeats the checks available inside the sandbox. The local rerun and subsequent terminal verification completed on 2026-11-12. Current connection/browser fixes still need a focused rerun. Browser API requests are redirected to the disposable backend, including when testing a build configured for the production backend URL.
 
-All 29 active env fields are populated. Local format validation passed; five frontend fields are referenced. Nine backend storage fields still await the Upstash/Neon/R2 runtime migration. Live Groq, Upstash, Firebase, Neon, R2, SMTP and Telegram probes failed at network/connection access in this workspace; DNS resolution also failed. This does not prove that credentials are valid or invalid. No AI completion or notification was sent.
+## Current results
 
-SQLite fallback and worker startup are disabled while storage migration is pending. Four focused API configuration tests passed and establish that the public roster/health do not touch SQLite and private operations require identity before returning storage-unavailable errors. The full runtime suite needs adaptation to the new storage architecture.
+The terminal run on 2026-11-12 passed all 51 backend tests, including actual Redis Lua. After the SMTP certificate-trust and browser fixture CORS fixes, the complete backend suite passed **54 tests with no skips**. The three added regressions check verified TLS roots, CORS/fixture identity with allowed and denied origins, and useful Firebase diagnostics without credential leakage.
 
-## Historical evidence
+Five frontend movement/transport tests, TypeScript, rendering and the standalone office browser passed. The latter checks desktop/mobile, dark/light persistence, 15 cabins, details, hand-off phases, cancellation and reduced motion. Screenshots and the report are in `artifacts/office/`.
 
-31 backend tests and a Next.js production build passed for the previous SQLite application. **These do not verify the requested Redis/Firebase/Neon/R2 architecture or the latest office UI.** Historical provider/notification simulations were local tests, not live service verification. Production builds remain gated pending current successful connection checks. Docker is unavailable and container deployment is unverified.
+The Postman simulation passed. Its NDJSON log independently records two HTTP 200 requests for tool/continuation and three HTTP 503 requests. The real caller checker observed tool creation, a failed task and a skipped dependent. A separate live Groq completion for the selected NOVA model passed.
 
-## Repeat current UI checks
+Four of six live access probes passed: **Groq, Upstash, Neon and R2**. Firebase failed while refreshing the service-account token (`RefreshError`); local PEM parsing/project checks pass, but they cannot establish that Google accepts the key. The checker now classifies known refresh failures without logging credential material.
+
+SMTP failed with `SSLCertVerificationError`. This Python has no default CA file. The checker and runtime now supplement system roots with certifi; hostname/certificate verification stays enabled and 121 trusted CA roots were loaded. Actual SMTP authentication still needs the focused rerun. No real email or Telegram message was sent; Telegram remains deferred.
+
+## Workspace browser failure and fix
+
+The full workspace browser failed on its first health fetch. The disposable backend's outer middleware returned a new response before CORS ran. The fix decorates the existing health response and preserves CORS headers. Allowed-origin and denied-origin regression requests now pass. The actual Chrome workspace rerun is pending; the standalone browser pass does not establish workspace controls.
 
 ```bash
+backend/venv/bin/python scripts/verify_all.py --only connections,browser
+```
+
+The runner now prints failed-service reasons directly. Logs and reports remain in `artifacts/verification/` and `artifacts/browser/`. The browser redirects application API traffic to the disposable backend and uses ephemeral data.
+
+## Remaining verification
+
+Live managed-storage writes remain blocked by Firebase. The production build remains blocked by the required connection gate. Container checks are unavailable because Docker is not installed; native startup does not require Docker. Google sign-in, real notification delivery and live restart/failover remain unverified.
+
+## Repeat checks
+
+```bash
+NOVA_STATE_TESTS=1 backend/venv/bin/python -m unittest discover -s backend/tests -v
+backend/venv/bin/python scripts/audit_env.py
 cd frontend
-node node_modules/typescript/bin/tsc --noEmit
 npm run test:office
 npm run test:transport
-node ../scripts/render-office-preview.cjs
+node node_modules/typescript/bin/tsc --noEmit
 npm run test:office:browser
 ```
 
-Set CHROME_BIN to a Chrome/Chromium executable if needed. The standalone browser runner requires no backend and sends no work. It checks 15 cabins, desktop/mobile overflow, both themes, detail dialogs, hand-off stages, cancellation and reduced motion. Successful runs save actual screenshots and a report in artifacts/office.
-
-The older full-application browser harness remains for later migration work; it cannot verify the new persistence architecture yet. PLAN.md counts unverified work as remaining.
+Historical SQLite evidence does not establish managed-storage compatibility. Current Lua tests use fakeredis/lupa; Firestore/Neon/R2 integration tests use fixtures until live writes pass. See [PLAN.md](../PLAN.md) for implementation and acceptance states.

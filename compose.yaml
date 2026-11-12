@@ -7,15 +7,13 @@ services:
     environment:
       STORAGE_BACKEND: upstash
       FILE_STORAGE_BACKEND: r2
-      USER_FILES_PATH: /app/data/files
       SYSTEM_ROOT: /app
     ports: ["127.0.0.1:8000:8000"]
-    volumes: ["nova-data:/app/data"]
     restart: unless-stopped
     stop_grace_period: 30s
     init: true
     healthcheck:
-      test: ["CMD", "python", "-c", "import json,urllib.request; r=json.load(urllib.request.urlopen('http://127.0.0.1:8000/api/health')); assert r['worker']['running']"]
+      test: ["CMD", "python", "-c", "import json,urllib.request; r=json.load(urllib.request.urlopen('http://127.0.0.1:8000/api/health')); assert r['database']['connected'] and (r['worker']['running'] or r['worker'].get('standby'))"]
       interval: 30s
       timeout: 5s
       start_period: 15s
@@ -36,5 +34,3 @@ services:
     depends_on:
       backend:
         condition: service_healthy
-volumes:
-  nova-data:

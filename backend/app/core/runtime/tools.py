@@ -1,7 +1,5 @@
 """Specialist tools. Scoped user data, safe file paths, explicit command approvals."""
 import asyncio
-from contextlib import contextmanager
-import fcntl
 import hashlib
 import json
 import os
@@ -13,12 +11,10 @@ from pathlib import Path
 from xml.etree import ElementTree
 from zipfile import ZipFile
 import httpx
-from app.core.registry.agents import AGENTS
-from . import jobstore as db,repository as repo
+from .execution import AGENTS
+from . import jobstore as db,repository as repo,object_store,rag
 
 ROOT=Path(os.getenv('SYSTEM_ROOT') or db.BACKEND.parent).expanduser().resolve()
-_files=Path(os.getenv('USER_FILES_PATH','data/files')).expanduser()
-FILES=_files if _files.is_absolute() else db.BACKEND/_files
 MAX_FILE=20*1024*1024
 COMMON={'get_current_time','memory_search','save_memory','get_profile','update_profile','list_tasks','create_task','complete_task','list_files','read_file','write_file'}
 GRANTS={a:COMMON|set(spec.tools) for a,spec in AGENTS.items()}
@@ -42,7 +38,7 @@ SCHEMAS={s['function']['name']:s for s in [
  schema('complete_task','Mark a user to-do complete.',{'task_id':S('Task ID')},['task_id']),
  schema('list_files','List the current user uploaded/generated files.'),
  schema('read_file','Read a user file as text, PDF or DOCX.',{'filename':S('Filename')},['filename']),
- schema('write_file','Create an output file in the current user private file directory.',{'filename':S('Filename'),'content':S('Text content')},['filename','content']),
+ schema('write_file','Create an output file in the current user private file storage.',{'filename':S('Filename'),'content':S('Text content')},['filename','content']),
  schema('list_dir','List paths inside the configured system root; credentials are hidden.',{'path':S('Relative directory')}),
  schema('read_system_file','Read code inside the configured root; secret files are forbidden.',{'path':S('Relative file path')},['path']),
  schema('request_command','Request explicit user approval for a supported project command. Does not run until approved.',{'command':S('Command: pwd, ls, git status/diff/log, or npm run build/test/lint')},['command']),
@@ -76,72 +72,78 @@ def safe_name(filename):
     return filename
 
 
-def user_dir(user):
-    path=FILES/hashlib.sha256(user.encode()).hexdigest()
-    if path.is_symlink():raise ValueError('Private file directories cannot be symbolic links')
-    path.mkdir(parents=True,exist_ok=True)
-    if not path.resolve().is_relative_to(FILES.resolve()):raise ValueError('File path escapes the private storage root')
-    return path
-
-
-def file_path(user,filename):
-    path=user_dir(user)/safe_name(filename)
-    if path.is_symlink():raise ValueError('Symbolic links are not allowed')
-    return path
-
-
 def read_text(path):
     if path.stat().st_size>MAX_FILE:raise ValueError('File exceeds the 20 MB limit')
-    suffix=path.suffix.lower()
+    return extract_text(path.name,path.read_bytes())
+
+
+def extract_text(filename,data):
+    from io import BytesIO
+    suffix=Path(filename).suffix.lower()
     if suffix=='.pdf':
         from pypdf import PdfReader
-        return '\n'.join((p.extract_text() or '') for p in PdfReader(path).pages)[:80000]
+        return '\n'.join((p.extract_text() or '') for p in PdfReader(BytesIO(data)).pages)[:80000]
     if suffix=='.docx':
-        with ZipFile(path) as archive:
+        with ZipFile(BytesIO(data)) as archive:
             item=archive.getinfo('word/document.xml')
             if item.file_size>MAX_FILE:raise ValueError('DOCX extraction exceeds the limit')
             tree=ElementTree.fromstring(archive.read(item))
             return ' '.join(n.text or '' for n in tree.iter() if n.tag.endswith('}t'))[:80000]
     if suffix in {'.txt','.md','.csv','.json','.yaml','.yml','.toml','.py','.js','.jsx','.ts','.tsx','.css','.html','.sql','.sh','.rs','.go','.java','.xml','.log','.ini'}:
-        return path.read_text(errors='replace')[:80000]
+        return data.decode(errors='replace')[:80000]
     raise ValueError('This format is stored but cannot be indexed. Use text, code, PDF or DOCX.')
 
 
-@contextmanager
-def file_lock(user,filename):
-    lock_dir=user_dir(user)/'.locks';lock_dir.mkdir(exist_ok=True)
-    lock_path=lock_dir/(hashlib.sha256(safe_name(filename).encode()).hexdigest()+'.lock')
-    with lock_path.open('a') as lock:
-        fcntl.flock(lock,fcntl.LOCK_EX)
-        yield
-
+def file_id(filename):return 'file-'+hashlib.sha256(safe_name(filename).encode()).hexdigest()
 
 def save_file(user,filename,data):
-    with file_lock(user,filename):return _save_file(user,filename,data)
-
-
-def _save_file(user,filename,data):
+    safe_name(filename)
     if len(data)>MAX_FILE:raise ValueError('Files must be 20 MB or smaller')
-    path=file_path(user,filename);tmp=path.with_name(path.name+'.upload-'+str(uuid.uuid4()));tmp.write_bytes(data);tmp.replace(path)
-    # Re-uploading replaces old chunks for this file rather than leaving stale recall.
-    with db.connect() as c:c.execute("DELETE FROM documents WHERE user_id=? AND kind='memory' AND json_extract(payload,'$.source_file')=?",(user,filename))
-    warning=None;chunks=0
+    ident=file_id(filename);generation=str(uuid.uuid4())
+    object_key=f'users/{db.user_key(user)}/{ident}/{generation}/{filename}'
+    object_store.put(object_key,data)
+    warning=None;chunks=0;readable=False
     try:
-        text=read_text(path)
-        for start in range(0,len(text),2800):
-            repo.put(user,'memory',{'content':f'File {filename}:\n{text[start:start+3200]}','kind':'file','source_file':filename,'agent_id':None});chunks+=1
-    except Exception as exc:warning=str(exc) if isinstance(exc,ValueError) else f'File could not be indexed ({type(exc).__name__})'
-    prior=next((r for r in repo.list_for(user,'file') if r['filename']==filename),None)
-    return repo.put(user,'file',{'filename':filename,'size_bytes':len(data),'indexed':bool(chunks),'chunks_indexed':chunks,'readable':warning is None,'warning':warning},prior['id'] if prior else None)
+        text=extract_text(filename,data);readable=True
+        chunks=rag.replace(user,ident,generation,filename,text)
+    except Exception as exc:warning=str(exc) if isinstance(exc,ValueError) else f'File could not be indexed ({type(exc).__name__}); re-upload to retry'
+    # Immutable object and chunks are prepared before publishing one coherent pointer.
+    # Concurrent replacement can only select a complete generation, never mixed data.
+    payload={'filename':filename,'object_key':object_key,'generation':generation,'size_bytes':len(data),'indexed':bool(chunks),'chunks_indexed':chunks,'readable':readable,'warning':warning}
+    # Retain prepared data on an uncertain Firestore acknowledgement, since the
+    # pointer may already have committed and must remain downloadable.
+    row,previous=repo.put(user,'file',payload,ident,with_previous=True)
+    if previous:cleanup_file(user,previous)
+    return row
+
+
+def file_bytes(user,filename):
+    row=repo.get(user,file_id(filename),'file')
+    if not row:raise FileNotFoundError('File not found')
+    return object_store.get(row['object_key'])
+
+
+def read_file(user,filename):return extract_text(filename,file_bytes(user,filename))
 
 
 def delete_file(user,filename):
-    with file_lock(user,filename):
-        path=file_path(user,filename)
-        if path.exists():path.unlink()
-        with db.connect() as c:
-            c.execute("DELETE FROM documents WHERE user_id=? AND ((kind='file' AND json_extract(payload,'$.filename')=?) OR (kind='memory' AND json_extract(payload,'$.source_file')=?))",(user,filename,filename))
-    return {'ok':True}
+    # Atomically detach exactly the generation being removed. A concurrent upload
+    # publishes its own generation and cannot have its new object removed here.
+    row=repo.take(user,file_id(filename),'file')
+    if not row:return {'ok':False}
+    warning=cleanup_file(user,row)
+    return {'ok':True,**({'warning':warning} if warning else {})}
+
+def cleanup_file(user,row):
+    try:
+        object_store.delete(row['object_key'])
+        rag.delete(user,row['id'],row['generation'])
+        return None
+    except Exception as error:
+        # Durable cleanup records also cover partial deletion after a service outage.
+        ident=db.user_key(user+':'+row['id']+':'+row['generation'])
+        db.put('migrations',ident,{'id':ident,'kind':'file_cleanup','user_id':user,'file':row,'created_at':db.now()})
+        return f'File removed from active access; storage cleanup pending ({type(error).__name__})'
 
 
 def system_path(raw):
@@ -186,7 +188,7 @@ async def dispatch(user,agent,name,args):
             if not row:raise ValueError('Task not found')
             return {'ok':True,'task':repo.put(user,'task',{**row,'status':'done'},row['id'])}
         if name=='list_files':return {'ok':True,'files':repo.list_for(user,'file')}
-        if name=='read_file':return {'ok':True,'content':await asyncio.to_thread(read_text,file_path(user,args['filename']))}
+        if name=='read_file':return {'ok':True,'content':await asyncio.to_thread(read_file,user,args['filename'])}
         if name=='write_file':return {'ok':True,'file':await asyncio.to_thread(save_file,user,args['filename'],str(args['content']).encode())}
         if name=='list_dir':
             path=system_path(args.get('path',''));out=[]
@@ -200,15 +202,17 @@ async def dispatch(user,agent,name,args):
             command=args['command'];validate_command(command)
             from .execution import context
             ctx=context.get() or {}
-            with db.connect() as c:
-                c.execute('BEGIN IMMEDIATE')
+            ident=db.next_id('action')
+            def request(tx):
                 if ctx.get('workflow_id'):
-                    run=c.execute('SELECT status FROM workflows WHERE id=? AND user_id=?',(ctx['workflow_id'],user)).fetchone()
-                    if not run or run['status']=='cancelled':raise ValueError('Workflow cancelled; no new approval will be created')
-                prior=c.execute("SELECT id FROM actions WHERE user_id=? AND step_id IS ? AND workflow_id IS ? AND summary=? AND status='pending'",(user,ctx.get('step_id'),ctx.get('workflow_id'),command)).fetchone()
-                if prior:return {'ok':False,'status':'awaiting approval','action_id':prior['id'],'note':'Existing approval is pending. This command has NOT run.'}
-                cur=c.execute('INSERT INTO actions(user_id,agent_id,workflow_id,step_id,kind,summary,payload,created_at) VALUES(?,?,?,?,?,?,?,?)',(user,agent,ctx.get('workflow_id'),ctx.get('step_id'),'command',command,json.dumps({'command':command,'cwd':str(ROOT)}),db.now()))
-            return {'ok':False,'status':'awaiting approval','action_id':cur.lastrowid,'note':'This command has NOT run. Review it in Alerts. Do not request it again.'}
+                    run=tx.get('workflows',ctx['workflow_id'])
+                    if not run or run['user_id']!=user or run['status']=='cancelled':raise ValueError('Workflow cancelled; no new approval will be created')
+                prior=tx.rows('actions',user_id=user,step_id=ctx.get('step_id'),workflow_id=ctx.get('workflow_id'),summary=command,status='pending')
+                if prior:return prior[0]['id']
+                tx.put('actions',ident,{'id':ident,'user_id':user,'agent_id':agent,'workflow_id':ctx.get('workflow_id'),'step_id':ctx.get('step_id'),'kind':'command','summary':command,'payload':{'command':command,'cwd':str(ROOT)},'created_at':db.now(),'status':'pending','result':None,'resolved_at':None})
+                return ident
+            actual=db.atomic(['workflows','actions'],request)
+            return {'ok':False,'status':'awaiting approval','action_id':actual,'note':'This command has NOT run. Review it in Alerts. Do not request it again.'}
         simple={'journal_add':('journal','entry'),'habit_add':('habit','name'),'habit_log':('habit_log','name'),'workout_log':('workout','activity'),'watchlist_add':('watchlist','symbol')}
         if name in simple:
             kind,key=simple[name]
@@ -249,15 +253,25 @@ async def dispatch(user,agent,name,args):
 
 async def approve(user,action_id):
     if not privileged(user):return {'ok':False,'error':'Only the workspace owner may run system commands'}
-    with db.connect() as c:
-        row=c.execute("UPDATE actions SET status='executing' WHERE id=? AND user_id=? AND status='pending' AND (workflow_id IS NULL OR EXISTS(SELECT 1 FROM workflows WHERE workflows.id=actions.workflow_id AND status<>'cancelled')) RETURNING *",(action_id,user)).fetchone()
+    def claim(tx):
+        row=tx.get('actions',action_id)
+        if not row or row['user_id']!=user or row['status']!='pending':return None
+        if row['workflow_id']:
+            run=tx.get('workflows',row['workflow_id'])
+            if not run or run['status']=='cancelled':return None
+        row.update(status='executing',executing_at=db.now(),worker_token=db.fence.get());return dict(row)
+    row=db.atomic(['actions','workflows'],claim)
     if not row:return {'ok':False,'error':'Action unavailable or already resolved'}
     try:
-        argv=validate_command(json.loads(row['payload'])['command'])
-        def run():return subprocess.run(argv,cwd=ROOT,capture_output=True,text=True,timeout=60,env={'PATH':os.getenv('PATH',''),'LANG':'en_US.UTF-8','HOME':str(ROOT)})
+        argv=validate_command(row['payload']['command'])
+        db.assert_lease()
+        command_root=ROOT/'frontend' if argv[0]=='npm' and not (ROOT/'package.json').is_file() and (ROOT/'frontend/package.json').is_file() else ROOT
+        def run():return subprocess.run(argv,cwd=command_root,capture_output=True,text=True,timeout=60,env={'PATH':os.getenv('PATH',''),'LANG':'en_US.UTF-8','HOME':str(ROOT)})
         result=await asyncio.to_thread(run)
         outcome={'ok':result.returncode==0,'exit_code':result.returncode,'output':(result.stdout+result.stderr)[-16000:]}
+    except asyncio.CancelledError:
+        db.update('actions',action_id,{'status':'interrupted','resolved_at':db.now()},status='executing');raise
     except Exception as exc:outcome={'ok':False,'error':f'Command failed ({type(exc).__name__})'}
-    with db.connect() as c:c.execute('UPDATE actions SET status=?,result=?,resolved_at=? WHERE id=?',('done' if outcome['ok'] else 'failed',json.dumps(outcome),db.now(),action_id))
+    db.update('actions',action_id,{'status':'done' if outcome['ok'] else 'failed','result':outcome,'resolved_at':db.now()},status='executing')
     db.event(user,'approval_resolved',workflow_id=row['workflow_id'],step_id=row['step_id'],agent_id=row['agent_id'],action_id=action_id,result=outcome)
     return outcome

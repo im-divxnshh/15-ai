@@ -4,8 +4,9 @@ uvicorn[standard]==0.54.0
 pydantic==2.13.5
 python-dotenv==1.2.3
 httpx==0.28.1
+certifi==2026.07.22
 firebase-admin==7.7.0
 pypdf==6.19.0
 
-# Neon connection checks and upcoming PostgreSQL RAG adapter.
+# Neon chunk retrieval and connection checks.
 psycopg[binary]==3.3.6

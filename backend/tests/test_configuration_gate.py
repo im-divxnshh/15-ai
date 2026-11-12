@@ -11,16 +11,16 @@ from app.core.runtime import jobstore as db,execution
 
 class ConfigurationGateTests(unittest.TestCase):
     def test_preview_roster_and_health_do_not_open_sqlite_or_start_worker(self):
-        with patch.dict(os.environ,{'STORAGE_BACKEND':'upstash'}),patch.object(db.sqlite3,'connect') as sql:
+        with patch.dict(os.environ,{'STORAGE_BACKEND':'upstash','UPSTASH_REDIS_REST_TOKEN':''}),patch.object(db,'command') as sql:
             with TestClient(app) as client:
                 roster=client.get('/api/office/roster').json();health=client.get('/api/health').json()
             self.assertEqual(len(roster['agents']),15);self.assertFalse(roster['activity_available'])
             self.assertTrue(all(a['status']=='unavailable' for a in roster['agents']))
             self.assertFalse(health['worker']['running']);self.assertFalse(health['database']['connected'])
-            self.assertEqual(health['store']['backend'],'upstash');self.assertFalse(health['store']['implemented']);sql.assert_not_called()
+            self.assertEqual(health['store']['backend'],'upstash');self.assertTrue(health['store']['implemented']);sql.assert_not_called()
 
     def test_private_operations_require_identity_then_connected_storage(self):
-        with patch.dict(os.environ,{'APP_TOKEN':'configuration-test-token','ALLOW_LOCAL_NO_AUTH':'false','STORAGE_BACKEND':'upstash'}),patch.object(db.sqlite3,'connect') as sql:
+        with patch.dict(os.environ,{'APP_TOKEN':'configuration-test-token','ALLOW_LOCAL_NO_AUTH':'false','STORAGE_BACKEND':'upstash','UPSTASH_REDIS_REST_TOKEN':''}),patch.object(db,'command') as sql:
             with TestClient(app) as client:
                 self.assertEqual(client.get('/api/tasks').status_code,401)
                 headers={'Authorization':'Bearer configuration-test-token'}

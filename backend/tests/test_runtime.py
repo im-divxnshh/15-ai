@@ -1,7 +1,9 @@
-"""Durable runtime tests. HTTP simulations are in-process by default.
+"""Runtime behavior with disposable state/SDK and provider HTTP fixtures.
 
-Set NOVA_HTTP_TESTS=1 for actual loopback HTTP transport checks outside a
-workspace that restricts socket listeners. Neither mode verifies live services.
+Default mode exercises production Redis Lua through fakeredis/lupa.
+NOVA_STATE_TESTS=1 explicitly selects callback logic fixtures and excludes Lua.
+NOVA_HTTP_TESTS=1 uses real loopback provider/Telegram fixtures. Neither mode
+verifies live providers or sends real notifications.
 """
 import asyncio
 import json
@@ -18,6 +20,7 @@ from unittest.mock import patch
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from app.core.runtime import jobstore as db,workflows as work,execution,delivery,provider,repository as repo,tools
+from storage_fixtures import StorageFixtures
 from app.api.nova import router,current_user
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -26,12 +29,12 @@ class Base(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.tmp=tempfile.TemporaryDirectory();self.root=Path(self.tmp.name)
         self.env=patch.dict(os.environ,{'GROQ_API_KEY':'test-key','APP_TOKEN':'test-access','FIREBASE_CREDENTIALS':'','ALLOW_LOCAL_NO_AUTH':'false','SYSTEM_ACCESS_USER_ID':'one','TELEGRAM_BOT_TOKEN':'','SMTP_HOST':'','SMTP_USER':'','SMTP_PASSWORD':''})
-        self.env.start();self.paths=patch.multiple(db,PATH=self.root/'office.sqlite3');self.paths.start();self.toolpaths=patch.multiple(tools,FILES=self.root/'files',ROOT=self.root);self.toolpaths.start();db.init()
+        self.env.start();self.storage=StorageFixtures().start();self.toolpaths=patch.multiple(tools,ROOT=self.root);self.toolpaths.start();db.init()
     async def asyncTearDown(self):
         await work.stop()
         for _,task in work._active.values():task.cancel()
         await asyncio.gather(*(t for _,t in work._active.values()),return_exceptions=True);work._active.clear()
-        self.env.stop();self.paths.stop();self.toolpaths.stop();self.tmp.cleanup()
+        self.storage.stop();self.env.stop();self.toolpaths.stop();self.tmp.cleanup()
     def create(self,tasks,mode='sequential',user='one',key=None,concurrency=3):
         return work.create(user,work.BatchInput(title='Test mission',mode=mode,concurrency=concurrency,client_key=key,tasks=[work.StepInput(title=f'Task {i+1}',instruction=t if isinstance(t,str) else t[0],dependencies=[] if isinstance(t,str) else t[1],agent_id='friday') for i,t in enumerate(tasks)]))
     async def drain(self,ident,timeout=3):
@@ -54,12 +57,39 @@ class QueueTests(Base):
             await work.stop()
         self.assertEqual(db.get(run['id'])['status'],'completed');self.assertIn('persisted result',messages[1]);self.assertEqual(db.get(run['id'])['steps'][1]['attempts'],1)
 
-    async def test_legacy_import_preserves_owner_and_does_not_restore_deleted_history(self):
+    async def test_legacy_import_preserves_owner_and_deleted_history(self):
         from app.core.runtime.legacy import migrate
-        path=self.root/'local_store.json';path.write_text(json.dumps({'messages':[{'id':'old','user_id':'one','agent_id':'jarvis','role':'user','content':'Old private conversation'}],'tasks':[{'id':'old-task','user_id':'one','title':'Historical reminder','due_at':'2020'}]}))
-        self.assertEqual(migrate(path),2);self.assertEqual(len(repo.history('one','nova')),1);self.assertEqual(repo.history('two','nova'),[])
-        ident=repo.history('one','nova')[0]['id'];repo.delete('one',ident);self.assertEqual(migrate(path),0);self.assertEqual(repo.history('one','nova'),[])
-        await work.scheduled();self.assertEqual(repo.list_for('one','notification'),[])
+        path=self.root/'legacy.json';path.write_text(json.dumps({'messages':[{'id':'old','user_id':'one','agent_id':'jarvis','role':'user','content':'Old private conversation'}]}))
+        self.assertEqual(migrate(path),1);self.assertEqual(len(repo.history('one','nova')),1)
+        self.assertEqual(repo.history('two','nova'),[])
+        repo.delete('one',repo.history('one','nova')[0]['id'])
+        self.assertEqual(migrate(path),0);self.assertEqual(repo.history('one','nova'),[])
+
+    async def test_worker_recovery_preserves_active_http_requests(self):
+        db.activity_start('http-call','one','friday','Direct chat')
+        self.assertTrue(db.acquire('leader'))
+        token=db.fence.set('leader')
+        try:db.activity_start('worker-call','one','friday','Queue task')
+        finally:db.fence.reset(token)
+        work.recover()
+        states={r['call_id']:r['status'] for r in db.records('activity')}
+        self.assertEqual(states,{'http-call':'working','worker-call':'interrupted'})
+        db.update('activity','http-call',{'started_at':'2020-01-01T00:00:00+00:00'})
+        await work.scheduled()
+        self.assertEqual(db.records('activity',call_id='http-call')[0]['status'],'interrupted')
+
+    async def test_file_cleanup_retries_after_storage_failure(self):
+        from app.core.runtime import object_store
+        file=tools.save_file('one','notes.txt',b'copper reference')
+        with patch.object(object_store,'delete',side_effect=db.StorageUnavailable('down')):
+            removed=tools.delete_file('one','notes.txt')
+        self.assertTrue(removed['ok']);self.assertIn('warning',removed)
+        self.assertIsNone(repo.get('one',file['id']));self.assertEqual(repo.recall('one','copper'),[])
+        self.assertTrue(db.records('migrations',kind='file_cleanup'))
+        await work.scheduled()
+        self.assertEqual(db.records('migrations',kind='file_cleanup'),[])
+        self.assertEqual(self.storage.objects,{})
+
     async def test_sequential_dependencies_and_next_batch(self):
         calls=[]
         async def respond(user,msg,agent_id=None):
@@ -106,7 +136,7 @@ class QueueTests(Base):
         with self.assertRaises(ValueError):self.create([('bad',[0])])
     async def test_restart_marks_interrupted_without_replay(self):
         run=self.create(['was running','never started'])
-        with db.connect() as c:c.execute("UPDATE steps SET status='running',attempts=1 WHERE id=?",(run['steps'][0]['id'],));c.execute("UPDATE workflows SET status='running' WHERE id=?",(run['id'],))
+        db.update('steps',run['steps'][0]['id'],{'status':'running','attempts':1});db.update('workflows',run['id'],{'status':'running'})
         calls=[]
         async def respond(*args,**kwargs):calls.append(args);return execution.Turn('done','friday',['friday'])
         with patch.object(execution,'respond',respond):
@@ -121,23 +151,23 @@ class QueueTests(Base):
         with patch.object(execution,'respond',respond):
             run=self.create(['command']);await work.tick();await asyncio.sleep(.05);await work.tick()
             self.assertEqual(db.get(run['id'])['steps'][0]['status'],'waiting_approval')
-            with db.connect() as c:ident=c.execute('SELECT id FROM actions').fetchone()[0]
+            ident=db.records('actions')[0]['id']
             self.assertFalse((await tools.approve('two',ident))['ok']);self.assertTrue((await tools.approve('one',ident))['ok']);self.assertFalse((await tools.approve('one',ident))['ok'])
             result=await self.drain(run['id']);self.assertEqual(result['completed'],1);self.assertEqual(result['steps'][0]['attempts'],1)
     async def test_event_replay_and_file_memory_isolation(self):
         run=self.create(['event']);first=db.events('one',run['id']);db.event('one','tool_started',run['id'],tool='read_file')
         replay=db.events('one',run['id'],first[-1]['id']);self.assertEqual(replay[0]['kind'],'tool_started');self.assertEqual(db.events('two',run['id']),[])
         row=tools.save_file('one','notes.txt',b'Project preference: use copper.');self.assertTrue(row['indexed']);self.assertTrue(repo.recall('one','copper'));self.assertEqual(repo.recall('two','copper'),[])
-        with self.assertRaises(ValueError):tools.file_path('one','../secret')
+        with self.assertRaises(ValueError):tools.safe_name('../secret')
         with self.assertRaises(ValueError):tools.system_path('../outside')
         with self.assertRaises(ValueError):tools.system_path('.env')
         denied=await tools.dispatch('one','pepper','request_command',{'command':'pwd'});self.assertFalse(denied['ok'])
     async def test_reminders_routines_and_failure_review(self):
         task=repo.put('one','task',{'title':'Due task','status':'open','due_at':'2020-01-01T00:00:00+00:00','notified':False})
         routine=repo.put('one','routine',{'title':'Routine','instruction':'check','agent_id':'friday','interval_min':5,'enabled':True,'next_run_at':'2020','run_count':0})
-        await work.scheduled();await work.scheduled();self.assertEqual(len([r for r in repo.list_for('one','notification') if r['category']=='reminders']),1);self.assertEqual(len(db.listing('one')),1)
+        await work.scheduled();await work.scheduled();self.assertEqual(len([r for r in db.records('notices',user_id='one') if r['category']=='reminders']),1);self.assertEqual(len(db.listing('one')),1)
         run=db.listing('one')[0]
-        with db.connect() as c:c.execute("UPDATE workflows SET status='failed' WHERE id=?",(run['id'],))
+        db.update('workflows',run['id'],{'status':'failed'})
         await work.scheduled();self.assertFalse(repo.get('one',routine['id'])['enabled'])
 
     async def test_user_batches_overlap_without_cross_user_results(self):
@@ -173,28 +203,32 @@ class QueueTests(Base):
         tools.save_file('one','notes.txt',b'titanium preference')
         self.assertEqual(repo.recall('one','copper'),[]);self.assertTrue(repo.recall('one','titanium'))
         fact=repo.put('one','profile',{'key':'name','value':'Private name'})
-        with self.assertRaises(PermissionError):repo.put('two','profile',{'value':'changed'},fact['id'])
+        self.assertIsNone(repo.get('two',fact['id']));self.assertFalse(repo.delete('two',fact['id']))
+        self.assertEqual(repo.get('one',fact['id'])['value'],'Private name')
         self.assertEqual(repo.list_for('two','profile'),[])
         self.assertFalse(tools.save_file('one','unsupported.bin',b'\x00\xff')['indexed'])
 
     async def test_old_agent_history_and_memory_survive_a_busy_account(self):
         repo.add_message('one','nova','user','Old NOVA conversation');repo.put('one','memory',{'content':'Rare titanium preference'})
-        with db.connect() as c:
-            for i in range(2100):
-                c.execute('INSERT INTO documents VALUES(?,?,?,?,?,?)',(f'busy-{i}','one','message',json.dumps({'agent_id':'friday','role':'user','content':'Busy thread'}),db.now(),db.now()))
-                c.execute('INSERT INTO documents VALUES(?,?,?,?,?,?)',(f'memory-{i}','one','memory',json.dumps({'content':'Unrelated newer fact'}),db.now(),db.now()))
+        for i in range(2100):
+            repo.add_message('one','friday','user','Busy thread')
+            repo.put('one','memory',{'content':'Unrelated newer fact'})
         self.assertEqual(repo.history('one','nova')[0]['content'],'Old NOVA conversation');self.assertTrue(repo.recall('one','titanium'));self.assertEqual(repo.recall('two','titanium'),[])
 
-    async def test_symlink_directory_cannot_expose_another_users_files(self):
-        private=tools.user_dir('one');other=tools.FILES/ __import__('hashlib').sha256(b'two').hexdigest();other.symlink_to(private,target_is_directory=True)
-        with self.assertRaises(ValueError):tools.file_path('two','notes.txt')
+    async def test_private_objects_cannot_be_read_by_another_user(self):
+        tools.save_file('one','notes.txt',b'private copper')
+        with self.assertRaises(FileNotFoundError):tools.file_bytes('two','notes.txt')
+        self.assertEqual(repo.recall('two','copper'),[])
 
     async def test_parallel_file_writes_leave_one_consistent_index(self):
-        await asyncio.gather(asyncio.to_thread(tools.save_file,'one','shared.txt',b'copper'*1000),asyncio.to_thread(tools.save_file,'one','shared.txt',b'titanium'*1000))
-        text=tools.file_path('one','shared.txt').read_text();rows=repo.list_for('one','file');memories=repo.list_for('one','memory')
-        self.assertEqual(len(rows),1);self.assertEqual(rows[0]['size_bytes'],len(text.encode()));self.assertEqual(len(memories),rows[0]['chunks_indexed'])
+        await asyncio.gather(asyncio.to_thread(tools.save_file,'one','shared.txt',b'copper '*1000),asyncio.to_thread(tools.save_file,'one','shared.txt',b'titanium '*1000))
+        text=tools.file_bytes('one','shared.txt').decode();rows=repo.list_for('one','file')
+        self.assertEqual(len(rows),1);self.assertEqual(rows[0]['size_bytes'],len(text.encode()))
         keyword='titanium' if 'titanium' in text else 'copper'
-        self.assertTrue(all(keyword in row['content'] for row in memories));tools.delete_file('one','shared.txt');self.assertEqual(repo.list_for('one','memory'),[])
+        found=repo.recall('one',keyword)
+        self.assertTrue(found);self.assertTrue(all(keyword in row['content'] for row in found))
+        self.assertTrue(all(row['generation']==rows[0]['generation'] for row in found))
+        tools.delete_file('one','shared.txt');self.assertEqual(repo.recall('one',keyword),[])
 
 class HTTPHandler(BaseHTTPRequestHandler):
     requests=[]
@@ -252,13 +286,13 @@ class TransportTests(Base):
     async def test_tool_round_and_activity(self):
         result=await execution.respond('one','TOOL_REQUEST','friday');self.assertFalse(result.error);self.assertEqual(result.reply,'Useful local HTTP answer');self.assertEqual(len(repo.list_for('one','task')),1)
         events=db.events('one');self.assertIn('tool_started',[e['kind'] for e in events]);self.assertIn('tool_completed',[e['kind'] for e in events])
-        with db.connect() as c:row=c.execute('SELECT status FROM activity').fetchone();self.assertEqual(row[0],'idle')
+        self.assertEqual(db.records('activity')[0]['status'],'idle')
     async def test_missing_credentials_and_bounded_delivery_failures(self):
         prefs={'email':'divyansh20060@gmail.com','telegram_chat_id':'123','email_enabled':True,'telegram_enabled':True,'categories':delivery.CATEGORIES}
         delivery.save_settings('one',prefs);delivery.queue('one','Test','Body',is_test=True);await delivery.tick();history=delivery.history('one');self.assertEqual({r['status'] for r in history},{'blocked'});self.assertFalse(delivery.settings('one')['connections']['telegram']['verified'])
         with patch.dict(os.environ,{'TELEGRAM_BOT_TOKEN':'fail-telegram'}):
             for i in range(3):
-                with db.connect() as c:c.execute('UPDATE deliveries SET next_attempt=0')
+                for row in db.records('deliveries'):db.update('deliveries',row['id'],{'next_attempt':0})
                 await delivery.tick()
             telegram=next(r for r in delivery.history('one') if r['channel']=='telegram');self.assertEqual(telegram['status'],'failed');self.assertEqual(telegram['attempts'],3);self.assertFalse(delivery.settings('one')['connections']['telegram']['verified'])
         self.assertEqual(delivery.history('two'),[])
@@ -314,8 +348,8 @@ class TransportTests(Base):
             delivery.queue('one','SMTP test','Test body',is_test=True);await delivery.tick()
             self.assertEqual([c[0] for c in calls],['connect','tls','login','send']);self.assertTrue(delivery.settings('one')['connections']['email']['verified'])
             delivery.queue('one','In-flight','Message')
-            with db.connect() as c:c.execute("UPDATE deliveries SET status='sending' WHERE status='pending'")
-            delivery.start();await delivery.stop()
+            for row in db.records('deliveries',status='pending'):db.update('deliveries',row['id'],{'status':'sending'})
+            work.recover()
             self.assertEqual(delivery.history('one')[0]['status'],'interrupted')
 
     async def test_routing_collaboration_and_plan_use_real_provider_path(self):

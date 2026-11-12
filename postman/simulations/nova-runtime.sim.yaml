@@ -1,0 +1,8 @@
+simulation: nova-runtime
+routing: path
+mocks:
+  - name: Groq
+    routeKey: groq
+    origin:
+      - api.groq.com
+    path: postman/mocks/groq/config.yaml

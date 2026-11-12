@@ -7,6 +7,8 @@ import os from 'node:os';
 import puppeteer from 'puppeteer-core';
 
 const base=process.env.NOVA_BROWSER_URL||'http://localhost:3000';
+const backend=process.env.NOVA_BROWSER_BACKEND_URL||'http://localhost:8000';
+assert.ok(/^http:\/\/(127\.0\.0\.1|localhost):\d+$/.test(backend),'Use a loopback disposable backend');
 const candidates=[process.env.CHROME_BIN,'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome','/usr/bin/chromium','/usr/bin/google-chrome',path.join(os.homedir(),'.cache/puppeteer/chrome-headless-shell/mac-146.0.7680.31/chrome-headless-shell-mac-x64/chrome-headless-shell')].filter(Boolean);
 let executablePath;
 for(const candidate of candidates){try{await fs.access(candidate);executablePath=candidate;break;}catch{}}
@@ -17,11 +19,18 @@ const report={provider:'simulated',checks:[],screenshots:[]};
 try{
  browser=await puppeteer.launch({executablePath,headless:true,pipe:true,args:process.env.NOVA_CHROME_NO_SANDBOX==='1'?['--no-sandbox']:[]});
  const page=await browser.newPage();const errors=[];
+ await page.setRequestInterception(true);
+ page.on('request',request=>{
+  const url=new URL(request.url());
+  // Route every application API call to the disposable backend, including
+  // builds whose public backend URL points to the production service.
+  void request.continue(url.pathname.startsWith('/api/')?{url:backend+url.pathname+url.search}:{});
+ });
  page.on('pageerror',e=>errors.push(e.message));
  const click=async text=>{await page.waitForFunction(t=>[...document.querySelectorAll('button')].some(b=>b.textContent.trim()===t&&!b.disabled),{},text);await page.evaluate(t=>[...document.querySelectorAll('button')].find(b=>b.textContent.trim()===t&&!b.disabled).click(),text);};
  const fill=async(selector,text)=>{await page.waitForSelector(selector);await page.$eval(selector,(el,text)=>{const setter=Object.getOwnPropertyDescriptor(el instanceof HTMLTextAreaElement?HTMLTextAreaElement.prototype:HTMLInputElement.prototype,'value').set;setter.call(el,text);el.dispatchEvent(new Event('input',{bubbles:true}));},text);};
  await page.goto(base+'/workspace',{waitUntil:'networkidle2'});
- const fixture=await page.evaluate(async()=>{const r=await fetch('http://localhost:8000/api/health');return r.json()});
+ const fixture=await page.evaluate(async backend=>{const r=await fetch(backend+'/api/health');return r.json()},backend);
  assert.equal(fixture.verification,'simulated-disposable-harness','Run backend/tests/browser_server.py; never run these writes against your live office.');
  await fill('[aria-label="Office access token"]','nova-browser-test');await click('Connect office');await page.waitForSelector('.cabin');
  assert.equal(await page.$$eval('.cabin',e=>e.length),15);report.checks.push('15 cabins and authenticated roster');
@@ -36,7 +45,7 @@ try{
   }
  }
  report.checks.push('Desktop/mobile layout and persistent dark/light themes');
- await page.click('.cabin[aria-label^="Michel,"]');await page.waitForFunction(()=>document.querySelector('h2')?.textContent==='Michel');await page.click('details.card summary');
+ await page.click('.cabin[aria-label^="Michel,"]');await page.waitForFunction(()=>[...document.querySelectorAll('h2')].some(e=>e.textContent==='Michel'));await page.click('details.card summary');
  assert.ok((await page.$eval('details.card',el=>el.textContent)).includes('Available tools'));report.checks.push('Cabin opens matching agent capabilities');
  await fill('[aria-label="Chat message"]','Verify a reply');await click('Send');await page.waitForFunction(()=>document.querySelector('.conversation')?.textContent.includes('Simulated verification reply'));
  await click('Clear history');report.checks.push('Chat reply and history clearing');

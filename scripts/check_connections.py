@@ -21,8 +21,10 @@ from urllib.parse import urlsplit,quote
 import httpx
 from dotenv import dotenv_values
 
-CHECK_VERSION=4
+CHECK_VERSION=5
 ROOT=Path(__file__).resolve().parents[1]
+sys.path.insert(0,str(ROOT/'backend'))
+from app.core.runtime import tls
 REPORT=ROOT/'artifacts/connection-report.json'
 logging.getLogger('httpx').setLevel(logging.WARNING)
 logging.getLogger('httpcore').setLevel(logging.WARNING)
@@ -135,6 +137,26 @@ def r2_head_bucket(env):
     headers['Authorization']='AWS4-HMAC-SHA256 Credential='+env['R2_ACCESS_KEY_ID']+'/'+scope+', SignedHeaders='+signed+', Signature='+signature
     with httpx.Client(timeout=8) as client:return client.head('https://'+host+path,headers=headers).status_code
 
+def failure_detail(service,error):
+    if service=='firebase' and type(error).__name__=='RefreshError':
+        data=next((arg for arg in error.args if isinstance(arg,dict)),{})
+        code=data.get('error')
+        message=str(data.get('error_description') or (error.args[0] if error.args else '')).lower()
+        if 'invalid jwt signature' in message:
+            return 'Firebase rejected the service-account JWT signature. Replace FIREBASE_CREDENTIALS with a current key for that service account.'
+        if 'account not found' in message or 'has been deleted' in message:
+            return 'Firebase service account was not found. Check the account and use its current Admin credentials.'
+        if 'disabled' in message:
+            return 'Firebase service account is disabled. Enable the intended account or use an active account.'
+        if 'invalid jwt' in message and any(term in message for term in ('timeframe','iat','exp','short-lived')):
+            return 'Firebase rejected JWT timing. Check the system date/time and automatic clock synchronization.'
+        if code in ('invalid_grant','invalid_client','unauthorized_client','invalid_scope','access_denied'):
+            return f'Firebase rejected service-account token refresh ({code}). Check the account/key status, permissions and system time.'
+        return 'Firebase service-account token refresh failed. Check the account/key status and system time.'
+    if service=='email' and isinstance(error,ssl.SSLCertVerificationError):
+        return 'SMTP certificate verification failed. Check SMTP_HOST and the trusted CA bundle; TLS verification remains enabled.'
+    return f'{service} connection unavailable ({type(error).__name__}); check credentials and network access'
+
 def probe(service,env):
     problem=validate(service,env)
     if problem:return {'status':'missing','detail':problem}
@@ -152,7 +174,7 @@ def probe(service,env):
             with httpx.Client(timeout=8) as client:
                 response=client.post(env['UPSTASH_REDIS_REST_URL'].rstrip('/'),headers={'Authorization':'Bearer '+env['UPSTASH_REDIS_REST_TOKEN']},json=['PING'])
             if response.status_code!=200 or response.json().get('result')!='PONG':return {'status':'failed','detail':f'Upstash PING rejected (HTTP {response.status_code})'}
-            detail='Upstash Redis REST PING succeeded. Queue/storage migration is still a separate implementation task.'
+            detail='Upstash Redis REST PING succeeded. Queue transactions and execution require separate integration verification.'
         elif service=='neon':
             import psycopg
             with psycopg.connect(env['NEON_URL'],connect_timeout=8,sslmode='require') as connection:
@@ -166,7 +188,7 @@ def probe(service,env):
             if status!=200:return {'status':'failed','detail':f'R2 bucket access rejected (HTTP {status}); check account, bucket and key permissions'}
             detail='R2 bucket HEAD succeeded. File upload permissions and application integration are not yet verified.'
         elif service=='email':
-            port=int(env['SMTP_PORT']);secure=port==465;context=ssl.create_default_context()
+            port=int(env['SMTP_PORT']);secure=port==465;context=tls.context()
             cls=smtplib.SMTP_SSL if secure else smtplib.SMTP
             with cls(env['SMTP_HOST'],port,timeout=8,**({'context':context} if secure else {})) as smtp:
                 if not secure:smtp.starttls(context=context)
@@ -203,7 +225,7 @@ def probe(service,env):
         return {'status':'passed','detail':detail}
     except Exception as error:
         # Exceptions can contain passwords, connection strings or bot URLs.
-        return {'status':'failed','detail':f'{service} connection unavailable ({type(error).__name__}); check credentials and network access'}
+        return {'status':'failed','detail':failure_detail(service,error)}
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)

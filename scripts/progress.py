@@ -21,6 +21,13 @@ def load():
     return json.loads(SOURCE.read_text())
 
 
+def check_outcome(check, scope=''):
+    if check['exit_code'] == 0:
+        return 'passed'
+    scope = (check.get('scope') or scope).lower()
+    return 'blocked / not attempted' if 'not attempted' in scope or scope.startswith('blocked by') else 'failed'
+
+
 def generate(data=None):
     data = data or load()
     tasks = data['tasks']
@@ -28,8 +35,11 @@ def generate(data=None):
     total = len(tasks)
     verified = sum(t['status'] == 'complete' and bool(t.get('verification_task')) for t in tasks)
     verification_total = sum(bool(t.get('verification_task')) for t in tasks)
+    counts = {state: sum(t['status'] == state for t in tasks) for state in STATES}
     lines = ['# 15-AI / NOVA OS — implementation & verification plan', '',
-             f'**{complete}/{total} work items complete · {total-complete} remaining · {round(complete/total*100)}% complete**', '',
+             f"**Overall status: {'Complete' if complete == total else 'Not fully complete'}.**", '',
+             f'**{complete}/{total} work items complete · {total-complete} remaining · {round(complete/total*100)}% accepted as complete**', '',
+             'Status breakdown: ' + ' · '.join(f'{counts[state]} {LABELS[state].lower()}' for state in ('complete', 'implemented', 'blocked', 'in_progress', 'pending') if counts[state]) + '.', '',
              f'Verification gates passed: **{verified}/{verification_total}**. Implemented work is not counted complete until its acceptance checks are recorded.', '',
              f"Last progress update: {data['updated_at']}", '',
              f"Current step: **{data['current_step']}**", '',
@@ -40,6 +50,10 @@ def generate(data=None):
     for i, task in enumerate(tasks, 1):
         note = (task.get('evidence') or task['acceptance']).replace('|','/').replace('\n',' ')
         lines.append(f"| {i} | {task['title']} | {LABELS[task['status']]} | {note} |")
+    if data.get('remaining_acceptance'):
+        lines += ['', '## Remaining acceptance checks', '', *[f'- {step}' for step in data['remaining_acceptance']]]
+    if data.get('deferred_scope'):
+        lines += ['', '## Deferred scope', '', *[f'- {step}' for step in data['deferred_scope']]]
     lines += ['', '## Execution order', '', *[f'{i+1}. {step}' for i,step in enumerate(data['phases'])], '',
               '## Current setup', '', *[f'- {step}' for step in data['setup']], '',
               '## Actual verification', '',
@@ -47,9 +61,9 @@ def generate(data=None):
     for task in tasks:
         if task.get('last_check'):
             check = task['last_check']
-            lines.append(f"- {task['title']}: {'passed' if check['exit_code'] == 0 else 'failed'} at {check['at']} (exit {check['exit_code']}).")
+            lines.append(f"- {task['title']}: {check_outcome(check, task.get('evidence', ''))} at {check['at']} (exit {check['exit_code']}).")
     for check in data.get('local_checks',[]):
-        lines.append(f"- {check['title']}: {'passed' if check['exit_code'] == 0 else 'failed'} at {check['at']} (exit {check['exit_code']}). {check['scope']}")
+        lines.append(f"- {check['title']}: {check_outcome(check)} at {check['at']} (exit {check['exit_code']}). {check['scope']}")
     if not any(t.get('last_check') for t in tasks) and not data.get('local_checks'):
         lines.append('- No verification gates have been run against the replacement application yet.')
     lines += ['', '## Scope and continuity', '',

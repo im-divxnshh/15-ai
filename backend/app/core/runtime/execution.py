@@ -37,7 +37,7 @@ async def agent_reply(user,agent_id,message):
     spec=AGENTS.get(agent_id)
     if not spec:raise ValueError('Unknown agent')
     call=str(uuid.uuid4());stamp=db.now()
-    with db.connect() as c:c.execute('INSERT INTO activity VALUES(?,?,?,?,?,?,NULL)',(call,user,agent_id,message[:160],'working',stamp))
+    db.activity_start(call,user,agent_id,message[:160])
     emit(user,'agent_started',agent_id,task=message[:160])
     state='idle'
     try:
@@ -72,7 +72,7 @@ async def agent_reply(user,agent_id,message):
         state='failed';error=str(exc) if isinstance(exc,provider.ProviderError) else type(exc).__name__;emit(user,'agent_failed',agent_id,error=error)
         repo.put(user,'message',{'agent_id':agent_id,'role':'assistant','content':'Execution failed: '+error,'error':True});raise
     finally:
-        with db.connect() as c:c.execute('UPDATE activity SET status=?,finished_at=? WHERE call_id=?',(state,db.now(),call))
+        db.activity_finish(call,state)
         if state=='idle':emit(user,'agent_completed',agent_id)
 
 
@@ -85,7 +85,7 @@ async def respond(user,message,agent_id=None):
         else:
             repo.add_message(user,'__auto__','user',message)
             call=str(uuid.uuid4())
-            with db.connect() as c:c.execute('INSERT INTO activity VALUES(?,?,?,?,?,?,NULL)',(call,user,'nova','Routing: '+message[:140],'working',db.now()))
+            db.activity_start(call,user,'nova','Routing: '+message[:140])
             routing_state='idle'
             try:
                 roster='\n'.join(f'{a.id}: {a.role}' for a in AGENTS.values())
@@ -97,7 +97,7 @@ async def respond(user,message,agent_id=None):
                 routing_state='interrupted' if asyncio.current_task().cancelling() else 'failed'
                 emit(user,'routing_'+routing_state,'nova');raise
             finally:
-                with db.connect() as c:c.execute('UPDATE activity SET status=?,finished_at=? WHERE call_id=?',(routing_state,db.now(),call))
+                db.activity_finish(call,routing_state)
         results=await asyncio.gather(*(agent_reply(user,a,message) for a in agents),return_exceptions=True)
         failures=[r for r in results if isinstance(r,BaseException)]
         drafts=[(a,r) for a,r in zip(agents,results) if isinstance(r,str)]

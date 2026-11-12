@@ -1,4 +1,4 @@
-"""NOVA OS: authenticated API and elected continuous worker on a persistent volume."""
+"""NOVA OS: authenticated API and elected continuous worker on managed storage."""
 import logging
 import os
 from contextlib import asynccontextmanager

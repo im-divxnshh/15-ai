@@ -59,4 +59,15 @@ class ConnectionCheckerTests(unittest.TestCase):
         self.env['TELEGRAM_CHAT_ID']='new-chat'
         self.assertEqual(self.run_cli('--require-verified','--include-telegram')[0],1)
 
+    def test_firebase_refresh_diagnostic_is_useful_and_redacts_credentials(self):
+        from google.auth.exceptions import RefreshError
+        failure=RefreshError('private-secret',{'error':'invalid_grant','error_description':'Invalid JWT Signature. private-secret'})
+        detail=checker.failure_detail('firebase',failure)
+        self.assertIn('JWT signature',detail)
+        self.assertNotIn('private-secret',detail)
+        failure=RefreshError('private-secret',{'error':'invalid_grant','error_description':'private-secret'})
+        detail=checker.failure_detail('firebase',failure)
+        self.assertIn('invalid_grant',detail)
+        self.assertNotIn('private-secret',detail)
+
 if __name__=='__main__':unittest.main()

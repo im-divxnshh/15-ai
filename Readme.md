@@ -1,82 +1,52 @@
 # 15-AI / NOVA OS
 
-NOVA is the CEO and orchestrator of a 15-robot office. The public homepage shows a connected 2D floor with fifteen private cabins, furnished desks, shared walkways, clickable agent details, and persistent dark/light themes. Voice work is deferred.
+NOVA leads a fifteen-robot office with fourteen specialists. The public homepage has connected private cabins, clickable capabilities, a walking assignment demo and persistent dark/light themes. `/workspace` provides authenticated chats, workflows, files, tasks, routines, approvals and delivery preferences. Voice features remain deferred.
 
-## See the office now
+The Redis/Firebase/Neon/R2 migration is implemented. **54 backend tests pass**, including actual Redis Lua and TLS/CORS regressions; five frontend tests, TypeScript and standalone desktop/mobile browser checks pass. Live Groq, Upstash, Neon and R2 access and a Groq completion passed. Firebase token refresh and SMTP certificate verification failed in the live run; CA-trust/CORS fixes await a focused rerun. The production build remains gated. [PLAN.md](PLAN.md) and [VERIFICATION.md](docs/VERIFICATION.md) record the actual evidence.
 
-Open **frontend/public/office-preview.html** in your browser. It is standalone and needs no backend, credentials, build, or external assets. Choose Friday and click **Preview assignment**: the robot walks to NOVA, collects the brief, and returns to its cabin. A four-stage assignment flow follows the animation. Stop/replay controls are included. This is a labelled animation demo; it sends no AI tasks or notifications.
+The active runtime uses Groq for AI, Firebase Auth/Firestore for identity and user documents, Upstash Redis for execution/state/events/outbox, Neon PostgreSQL/pgvector for document chunks, and private Cloudflare R2 objects for files. File vectors use local token hashes for lexical retrieval. No SQLite fallback is mounted.
 
-The floor plan scrolls to keep cabin text readable on smaller screens. Switch to **Cabin list** for a compact mobile view. Click any cabin for its role and configured capabilities.
+## Preview and development
 
-If your browser needs an HTTP origin, run this from your own terminal:
+Open [office-preview.html](frontend/public/office-preview.html) directly. This standalone office needs no backend or credentials. Select a specialist and choose **Preview assignment** for a labelled animation demo. Run `node scripts/render-office-preview.cjs` to refresh it after UI changes.
 
-```bash
-python3 -m http.server 3001 --bind 127.0.0.1 --directory frontend/public
-```
-
-Then open http://localhost:3001/office-preview.html. Refresh the standalone file after UI changes with `node scripts/render-office-preview.cjs`.
-
-## Current state
-
-**3/27 work items complete; 24 remaining.** [PLAN.md](PLAN.md) generates counts from project-progress.json. UI code is implemented; real browser visual verification remains pending because Chrome exits before page checks in this managed workspace.
-
-The previous application used SQLite. The requested Upstash/Firebase/Neon/R2 migration is **pending**, and SQLite fallback is disabled. The backend does not start the worker or accept private data operations until storage is implemented. Existing queue, workflow, outbox and tool modules need integration and retesting. Earlier test/build passes do not verify this new architecture.
-
-Intended stack: Next.js 16 / React 19 / TypeScript, FastAPI / Python, Groq only for AI, Firebase for authentication and user data, Upstash Redis for durable execution/state/cache, Neon PostgreSQL/pgvector for chunk-based RAG, Cloudflare R2 for files, and SMTP/Telegram for notifications.
-
-## Configuration and connection checks
-
-All 24 backend and five frontend fields have values; private values were preserved. [ENV-AUDIT.md](docs/ENV-AUDIT.md) lists actual code references and remaining storage integration. No private keys belong in the frontend. Firebase Admin credentials use inline JSON in backend/.env, with no credential-file path.
+Use Python 3.12+, Node 22+ and npm. Preserve the populated `backend/.env` and `frontend/.env.local`; backend credentials stay private, and Firebase Admin accepts inline JSON.
 
 ```bash
+backend/venv/bin/python -m pip install -r backend/requirements-dev.txt
 backend/venv/bin/python scripts/audit_env.py
-backend/venv/bin/python scripts/check_connections.py --offline
 backend/venv/bin/python scripts/check_connections.py
 ```
 
-Offline validation cannot unlock builds. Live probes check Groq models, Firebase Admin/Auth, Upstash PING, Neon SELECT 1, R2 bucket access, SMTP TLS authentication and Telegram bot/chat lookup. They send no AI completion, email or Telegram message. Previous live probes failed at network/DNS access; credentials have not been verified or rejected. Actual notification delivery remains unverified.
-
-Production `npm run build` requires a current passing live connection report. Do not copy examples over filled env files. Restart the backend after private env changes; restart/rebuild the frontend after public env changes.
-
-## Application routes and local startup
-
-The frontend homepage `/` and `/office` show the public office. `/workspace` provides the Firebase-authenticated dashboard, agent chats and workflow controls. Public cabin previews expose no private history. When storage is available, office assignment movement consumes actual agent-start events, skips the initial historical snapshot, and stops on connection loss. Animation stages visualize the hand-off and do not represent execution progress.
-
-Use Python 3.12+, Node 22+, and npm. Dependencies are already present in this workspace; for a new checkout:
+Connection probes authenticate and read service configuration without sending AI completions, email or Telegram messages. Telegram is deferred unless `--include-telegram` is explicitly supplied. Production builds require a current passing report for all six required services.
 
 ```bash
-python3 -m venv backend/venv
-backend/venv/bin/python -m pip install -r backend/requirements.txt
-cd frontend
-npm ci
-```
-
-For frontend development from your own terminal:
-
-```bash
+backend/venv/bin/python -m uvicorn main:app --app-dir backend --host 127.0.0.1 --port 8000 --workers 1
 cd frontend
 npm run dev
 ```
 
-Open http://localhost:3000. The office is visible without sign-in. The authenticated workspace requires your Firebase configuration and a connected backend.
+Visit http://localhost:3000 for the office and `/workspace` for private controls. Redis elects the continuous worker; a replica without the lease stays in standby. Jobs continue after the browser closes. A restart or lost lease interrupts uncertain work for explicit review/retry. New accounts start with outgoing notification channels disabled.
+
+## Verification and production
+
+Run `backend/venv/bin/python scripts/verify_all.py` for the complete sequence and automatic PLAN.md updates. Use `--only backend,browser` to repeat selected checks, or `--local --only env,backend,office,transport,typescript,render` for sandbox-compatible checks. Live connections still gate the production build.
 
 ```bash
-backend/venv/bin/python -m uvicorn main:app --app-dir backend --host 127.0.0.1 --port 8000 --workers 1
-```
-
-Health and docs are available at `/api/health` and `/docs`. The API can expose the public roster and configuration while private operations return 503 for pending storage. This command currently does **not** enable continuous execution. Compose/Docker files are reference configurations awaiting migration and container verification; Docker is unavailable here.
-
-## Verification
-
-```bash
+backend/venv/bin/python -m unittest discover -s backend/tests -v
+backend/venv/bin/python backend/scripts/verify_storage.py
 cd frontend
 npm run test:office
 npm run test:transport
 node node_modules/typescript/bin/tsc --noEmit
-node ../scripts/render-office-preview.cjs
 npm run test:office:browser
+npm run build
 ```
 
-The three office tests verify all specialist paths reach the CEO and return without crossing other cabins, the animation/cancellation/reduced-motion lifecycle, and event-based movement without duplicate routing animations. Two transport tests cover SSE reconnect cursors/authentication and visible offline/validation errors. TypeScript and standalone rendering passed. The browser runner targets only the standalone file, checks desktop/mobile themes and interactions, and saves screenshots only after actual successful page checks. Chrome closed before these checks; no screenshots or visual pass are claimed.
+Run `verify_storage.py` after connection checks pass. It writes, reads and cleans up an isolated live Redis/Firestore/R2/Neon fixture, without AI calls or notifications. The default backend suite runs Redis Lua through fakeredis/lupa. `NOVA_STATE_TESTS=1` explicitly runs only disposable state logic and SDK/HTTP fixtures; it excludes the Redis Lua checks and cannot establish live readiness.
 
-See [verification evidence](docs/VERIFICATION.md). The full backend/runtime suite must be adapted after storage migration. Run `python3 scripts/progress.py watch` to regenerate PLAN.md whenever the tracker changes. The active API contract is [docs/openapi.json](docs/openapi.json); implemented handlers remain storage-gated.
+The production build is gated by `scripts/check_connections.py --require-verified`. After it passes, use `scripts/start-production.sh` or the provided Docker/Compose configuration. The backend must run continuously; durable data lives in managed services. Container deployment is unverified in this workspace.
+
+A local Postman Groq simulation is saved in `postman/simulations/nova-runtime.sim.yaml`. Run it on port 4010 and set `NOVA_SIMULATION_URL=http://127.0.0.1:4010` for `backend/tests/check_simulation.py`. See the adjacent context file for assumptions and unresolved evidence. No simulation has been published or deployed.
+
+The API contract is [openapi.json](docs/openapi.json), with [API documentation](docs/API.md) and interactive `/docs`. Run `python3 scripts/progress.py watch` to keep the plan synchronized with the tracker.

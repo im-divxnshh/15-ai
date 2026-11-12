@@ -1,6 +1,6 @@
 # NOVA OS API
 
-**Current readiness:** Upstash/Firebase/Neon/R2 persistence migration is pending. Private data endpoints require authentication and then return HTTP 503 while storage is unavailable; the background worker does not run. The workflow/data/delivery descriptions below document the retained handlers and their intended behavior, not a verified deployed runtime. SQLite fallback is disabled. Public `GET /api/office/roster` returns only the fifteen agent descriptors with unavailable activity; health endpoints are also public. `/api/session` verifies identity without opening storage.
+**Current readiness:** Redis execution/state/outbox, Firebase user documents, Neon chunk retrieval and private R2 objects are implemented. 54 backend tests pass, including actual Redis Lua and TLS/CORS regressions. Four live access probes and a Groq completion passed; Firebase refresh and SMTP TLS failures still gate live storage and the production build. The standalone office browser passed; full workspace verification awaits its CORS-fix rerun. Private data endpoints require authentication and return HTTP 503 when required storage is unavailable. SQLite fallback is disabled. Public `GET /api/office/roster` exposes only fifteen agent descriptors with unavailable activity; health and `/api/session` remain usable without private storage.
 
 The active contract is [openapi.json](openapi.json), generated from `backend/main.py`. Interactive docs are at `http://localhost:8000/docs`. Regenerate with `backend/venv/bin/python backend/scripts/export_openapi.py`.
 
@@ -58,7 +58,7 @@ The SSE stream sends persisted IDs and JSON event data, plus a `ready` event and
 
 Supported specialist tools are listed in `/api/agents`; ungranted tools are rejected. System tools are owner-only (`APP_TOKEN` owner or `SYSTEM_ACCESS_USER_ID` Firebase UID). Paths outside SYSTEM_ROOT and credential/private-data paths are rejected. Commands have a narrow allowlist, require explicit approval, claim actions atomically, omit backend secrets from subprocess environments, and record outcomes once. They run with the backend's OS permissions; SYSTEM_ROOT is a path boundary, not an OS sandbox.
 
-Files: `GET /api/files` lists metadata; `PUT /api/files/{filename}` uploads raw bytes (20 MB maximum, `application/octet-stream`); `GET` downloads and `DELETE` removes the file and its indexed chunks. Text/code/PDF/DOCX are indexed. Other formats remain downloadable with warnings. Files use a private per-user directory. Re-upload replaces stale chunks. Memory is keyword recall, with no vector-search claim.
+Files: `GET /api/files` lists metadata; `PUT /api/files/{filename}` uploads raw bytes (20 MB maximum, `application/octet-stream`); `GET` downloads and `DELETE` removes the file and its indexed chunks. Text/code/PDF/DOCX are indexed. Other formats remain downloadable with warnings. R2 objects are private and scoped by authenticated user. Each replacement publishes an immutable generation; retrieval selects only its active Neon chunks. Deletion immediately removes active access and queues cleanup if storage is unavailable. Memory facts use keyword recall. File retrieval uses pgvector cosine distance over local token-hash vectors; these are lexical, not semantic AI embeddings. Groq remains the only AI provider.
 
 ## Delivery
 
@@ -70,4 +70,10 @@ SMTP passwords and Telegram tokens are read only from backend environment variab
 
 ## Errors
 
-`401`: missing/invalid identity; `404`: unavailable or other-user resource; `409`: invalid control transition; `413`: file too large; `422`: invalid data/dependency/filename; `502`: provider planning failure; `503`: unavailable authentication configuration. Chat returns an explicit `error` alongside any usable partial reply. Steps persist failures; the app never supplies fabricated successful answers or progress.
+`401`: missing/invalid identity; `404`: unavailable or other-user resource; `409`: invalid control transition; `413`: file too large; `422`: invalid data/dependency/filename; `502`: provider planning failure; `504`: timed-out chat/planning request; `503`: unavailable authentication or storage configuration/connection. Chat returns an explicit `error` alongside any usable partial reply. Steps persist failures; the app never supplies fabricated successful answers or progress.
+
+## Storage and continuous execution
+
+Redis Lua commits compare record revisions atomically and fence stale workers. A renewable lease elects one queue/outbox worker across replicas; followers remain in standby. A lost lease cancels local tasks, and the next leader marks uncertain in-flight work interrupted instead of replaying it. Redis Lua tests passed; the live managed-storage integration checks remain pending.
+
+Firestore paths include the authenticated user hash. Neon queries bind the owner and active file generation as parameters. Schema initialization enables pgvector and creates `nova_chunks` lazily on the first indexing/retrieval call. Files upload to R2 before publishing their Firestore metadata. An uncertain Firestore acknowledgement can leave an orphan generation, so no prepared data is deleted automatically when the commit outcome is unknown.

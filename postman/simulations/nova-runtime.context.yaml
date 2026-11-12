@@ -1,0 +1,30 @@
+purpose:
+  stands_in_for: Groq OpenAI-compatible completion responses used by NOVA.
+  unblocks: Local execution and provider failure checks without AI spend or real notifications.
+assumptions:
+  - id: completion-content-and-tools
+    status: unknown
+    claim: The selected live Groq model returns assistant content and tool calls using the expected OpenAI-compatible shape.
+    reason: Live NOVA-model text completion passed, while tool-call behavior was observed only in the local HTTP stand-in; the combined live claim remains unverified.
+    verification: On 2026-11-12 the Postman listener and caller ran successfully. The log records two HTTP 200 requests for tool creation/continuation, followed by three HTTP 503 requests. The live Groq smoke completion also passed; live tool calls remain unverified.
+    source: backend/app/core/runtime/provider.py; postman/contracts/groq.json; postman/mocks/groq/default.js
+    updated_at: '2026-11-12'
+  - id: transient-provider-failure
+    status: unknown
+    claim: A live Groq 503 response represents a transient completion failure.
+    reason: The caller bounds completion retries at three. Mock responses establish caller behavior only.
+    verification: On 2026-11-12 the real caller used the local Postman HTTP member. Three logged 503 responses produced a failed task and skipped dependent. This establishes caller retry/failure behavior under the fixture, while live 503 semantics remain unknown.
+    source: backend/tests/test_runtime.py; backend/app/core/runtime/provider.py
+    updated_at: '2026-11-12'
+  - id: caller-bounded-retry
+    status: supported
+    claim: The NOVA caller retries this simulated completion failure three times and records failed/skipped workflow state.
+    reason: The caller checker passed and the simulation log independently records exactly three 503 completion requests.
+    verification: Successful terminal run on 2026-11-12, with two prior 200 tool/continuation requests and three 503 failure requests.
+    source: backend/tests/check_simulation.py; artifacts/verification/simulation.ndjson
+    updated_at: '2026-11-13'
+fingerprints:
+  - id: local-contract
+    date: '2026-11-12'
+    commit: null
+    cli: '1.75.0; status command unavailable; mock generation wrote files then exited 139 after a macOS keychain error. Owner search was skipped.'

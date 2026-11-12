@@ -7,9 +7,9 @@ from datetime import datetime,timedelta,timezone
 from typing import Literal
 from fastapi import APIRouter,Depends,Header,HTTPException,Query,Request
 from fastapi.routing import APIRoute
-from fastapi.responses import FileResponse,StreamingResponse
+from fastapi.responses import Response,StreamingResponse
 from pydantic import BaseModel,Field
-from app.core.runtime import jobstore as db,workflows,execution,provider,repository as repo,delivery,tools
+from app.core.runtime import jobstore as db,workflows,execution,provider,repository as repo,delivery,tools,telegram
 from app.core.registry.agents import AGENTS
 
 def current_user(authorization:str|None=Header(None)):
@@ -18,14 +18,11 @@ def current_user(authorization:str|None=Header(None)):
     if app_token and token and hmac.compare_digest(token,app_token):return 'owner'
     if token:
         try:
-            import firebase_admin
-            from firebase_admin import auth,credentials
-            if not firebase_admin._apps:
-                raw=os.getenv('FIREBASE_CREDENTIALS','')
-                if not raw:raise HTTPException(503,'Firebase Admin credentials are not configured; use inline FIREBASE_CREDENTIALS or APP_TOKEN.')
-                firebase_admin.initialize_app(credentials.Certificate(json.loads(raw)),options={'projectId':os.getenv('FIREBASE_PROJECT_ID') or json.loads(raw).get('project_id')})
-            return auth.verify_id_token(token,check_revoked=True)['uid']
+            from firebase_admin import auth
+            from app.core.runtime.firebase_store import admin_app
+            return auth.verify_id_token(token,app=admin_app(),check_revoked=True)['uid']
         except HTTPException:raise
+        except db.StorageUnavailable:raise HTTPException(503,'Firebase authentication configuration is unavailable') from None
         except (ImportError,ValueError,json.JSONDecodeError):raise HTTPException(503,'Firebase authentication configuration is unavailable. Check inline credentials in backend/.env.') from None
         except Exception:raise HTTPException(401,'Invalid or expired access token') from None
     if os.getenv('ALLOW_LOCAL_NO_AUTH','false').lower()=='true':return 'local-owner'
@@ -82,13 +79,13 @@ def health():
     database_ready=False
     if db.storage_ready():
         try:
-            with db.connect() as c:c.execute('SELECT 1 FROM workflows LIMIT 1')
+            db.init()
             database_ready=True
         except Exception:missing.append('Persistent database unavailable')
     else:missing.append(db.storage_info()['reason'])
     if not delivery.configured(os.getenv('GROQ_API_KEY')):missing.append('GROQ_API_KEY')
     if not (os.getenv('APP_TOKEN') or os.getenv('FIREBASE_CREDENTIALS') or os.getenv('ALLOW_LOCAL_NO_AUTH')=='true'):missing.append('FIREBASE_CREDENTIALS or APP_TOKEN')
-    return {'status':'degraded' if missing else 'ok','agents':{'loaded':len(AGENTS),'errors':{}},'missing_env':missing,'worker':workflows.status(),'scheduler':{'running':workflows.status()['running']},'store':db.storage_info(),'database':{'connected':database_ready},'embeddings':{'ready':False,'model':'Neon chunk RAG integration pending','vector_search':False},'delivery':delivery.ready(),'provider':'groq','auth':{'firebase':bool(os.getenv('FIREBASE_CREDENTIALS')),'token':bool(os.getenv('APP_TOKEN')),'local':os.getenv('ALLOW_LOCAL_NO_AUTH')=='true'},'voice':'deferred'}
+    return {'status':'degraded' if missing else 'ok','agents':{'loaded':len(AGENTS),'errors':{}},'missing_env':missing,'worker':workflows.status(),'scheduler':{'running':workflows.status()['running']},'store':db.storage_info(),'database':{'connected':database_ready},'embeddings':{'ready':tools.rag.init.cache_info().currsize>0,'configured':bool(os.getenv('NEON_URL')),'model':'local-token-hash-v1-384','vector_search':tools.rag.init.cache_info().currsize>0,'semantic':False},'files':{'backend':'r2','configured':tools.object_store.ready()},'delivery':delivery.ready(),'provider':'groq','auth':{'firebase':bool(os.getenv('FIREBASE_CREDENTIALS')),'token':bool(os.getenv('APP_TOKEN')),'local':os.getenv('ALLOW_LOCAL_NO_AUTH')=='true'},'voice':'deferred'}
 
 
 @router.get('/office/roster')
@@ -102,7 +99,7 @@ def session(user=Depends(current_user)):return {'user_id':user}
 
 @router.get('/agents')
 def agents(user=Depends(current_user)):
-    with db.connect() as c:activity=[dict(r) for r in c.execute('SELECT * FROM activity WHERE user_id=? ORDER BY started_at DESC',(user,))]
+    activity=sorted(db.records('activity',user_id=user),key=lambda r:r['started_at'],reverse=True)
     out=[]
     for spec in sorted(AGENTS.values(),key=lambda a:(a.id!='nova',a.layer,a.id)):
         rows=[r for r in activity if r['agent_id']==spec.id];busy=next((r for r in rows if r['status']=='working'),None);latest=rows[0] if rows else {}
@@ -117,7 +114,8 @@ def reload_agents(user=Depends(current_user)):return {'reloaded':len(AGENTS),'er
 @router.post('/chat')
 async def chat(req:ChatRequest,user=Depends(current_user)):
     if req.agent_id and req.agent_id not in AGENTS:raise HTTPException(422,'Unknown agent')
-    turn=await execution.respond(user,req.message,req.agent_id)
+    try:turn=await asyncio.wait_for(execution.respond(user,req.message,req.agent_id),timeout=180)
+    except TimeoutError:raise HTTPException(504,'Agent request timed out; review recorded tool actions before retrying') from None
     delivery.queue(user,('Failed reply' if turn.error else AGENTS[turn.handled_by].name+' replied'),turn.reply or turn.error,'failures' if turn.error else 'replies')
     return {'reply':turn.reply or turn.error,'handled_by':turn.handled_by,'agent':{'id':turn.handled_by,'name':AGENTS[turn.handled_by].name},'agents_involved':turn.agents,'routing':{'reason':'Actual routing is recorded in Activity','confidence':None,'degraded':bool(turn.error)},'error':turn.error}
 
@@ -135,7 +133,8 @@ def clear_history(agent_id:str|None=None,user=Depends(current_user)):
 
 @router.post('/workflows/plan')
 async def make_plan(req:PlanRequest,user=Depends(current_user)):
-    try:return (await workflows.plan(req.instruction,req.mode,user)).model_dump()
+    try:return (await asyncio.wait_for(workflows.plan(req.instruction,req.mode,user),timeout=90)).model_dump()
+    except TimeoutError:raise HTTPException(504,'NOVA planning timed out') from None
     except (provider.ProviderError,ValueError) as exc:raise HTTPException(502 if isinstance(exc,provider.ProviderError) else 422,str(exc)) from None
 
 
@@ -163,11 +162,11 @@ def control(ident:str,action:Literal['pause','resume','cancel','retry'],user=Dep
 
 @router.get('/workflows/{ident}/stream')
 async def stream(ident:str,request:Request,after:int=Query(0,ge=0),user=Depends(current_user)):
-    if not db.get(ident,user):raise HTTPException(404,'Workflow not found')
+    if not await asyncio.to_thread(db.get,ident,user):raise HTTPException(404,'Workflow not found')
     async def generate():
         cursor=after;count=0;yield 'event: ready\ndata: {}\n\n'
         while not await request.is_disconnected():
-            for event in db.events(user,ident,cursor,100):
+            for event in await asyncio.to_thread(db.events,user,ident,cursor,100):
                 cursor=event['id'];yield f'id: {cursor}\ndata: {json.dumps(event)}\n\n'
             count+=1
             if count%20==0:yield ': keep-alive\n\n'
@@ -177,12 +176,15 @@ async def stream(ident:str,request:Request,after:int=Query(0,ge=0),user=Depends(
 
 @router.get('/events')
 def events(limit:int=Query(40,ge=1,le=200),user=Depends(current_user)):
-    with db.connect() as c:rows=c.execute('SELECT * FROM events WHERE user_id=? ORDER BY id DESC LIMIT ?',(user,limit)).fetchall()
-    return {'events':[{**dict(r),'payload':json.loads(r['payload'])} for r in rows]}
+    return {'events':db.recent_events(user,limit)}
 
 
 @router.get('/delivery/settings')
 def prefs(user=Depends(current_user)):return delivery.settings(user)
+@router.get('/telegram/status')
+def telegram_status(user=Depends(current_user)):
+    cfg=telegram.config()
+    return telegram.status() if cfg['user']==user else {'configured':False,'running':False,'state':'not_connected'}
 @router.put('/delivery/settings')
 def save_prefs(req:SettingsRequest,user=Depends(current_user)):return delivery.save_settings(user,req.model_dump())
 @router.get('/delivery')
@@ -194,12 +196,7 @@ def test_delivery(user=Depends(current_user)):
     return {'delivery_ids':ids,'status':'pending'}
 @router.post('/delivery/{ident}/retry')
 def retry_delivery(ident:int,user=Depends(current_user)):
-    prefs=delivery.settings(user)
-    with db.connect() as c:
-        row=c.execute('SELECT channel FROM deliveries WHERE id=? AND user_id=?',(ident,user)).fetchone()
-        dest=prefs['email' if row and row['channel']=='email' else 'telegram_chat_id']
-        changed=c.execute("UPDATE deliveries SET status='pending',attempts=0,next_attempt=0,error=NULL,destination=? WHERE id=? AND user_id=? AND status IN ('failed','blocked','interrupted','disabled')",(dest,ident,user)).rowcount
-    if not changed:raise HTTPException(409,'Delivery unavailable or not retryable')
+    if not delivery.retry(user,ident):raise HTTPException(409,'Delivery unavailable or not retryable')
     return {'ok':True}
 
 
@@ -249,10 +246,11 @@ async def upload(filename:str,request:Request,user=Depends(current_user)):
     except ValueError as exc:raise HTTPException(422,str(exc)) from None
 @router.get('/files/{filename}')
 def download(filename:str,user=Depends(current_user)):
-    try:path=tools.file_path(user,filename)
+    try:data=tools.file_bytes(user,filename)
     except ValueError as exc:raise HTTPException(422,str(exc)) from None
-    if not path.is_file():raise HTTPException(404,'File not found')
-    return FileResponse(path,filename=filename)
+    except FileNotFoundError:raise HTTPException(404,'File not found') from None
+    from urllib.parse import quote
+    return Response(data,media_type='application/octet-stream',headers={'Content-Disposition':"attachment; filename*=UTF-8''"+quote(filename,safe=''),'Cache-Control':'private, no-store'})
 @router.delete('/files/{filename}')
 def delete_file(filename:str,user=Depends(current_user)):
     try:return tools.delete_file(user,filename)
@@ -285,22 +283,20 @@ def delete_routine(ident:str,user=Depends(current_user)):return {'ok':repo.delet
 
 @router.get('/notifications')
 def alerts(user=Depends(current_user)):
-    rows=repo.list_for(user,'notification');return {'notifications':rows,'unread':sum(not r.get('read_at') for r in rows)}
+    rows=sorted([r for r in db.records('notices',user_id=user) if not r.get('is_test')],key=lambda r:r['created_at'],reverse=True)[:200];return {'notifications':rows,'unread':sum(not r.get('read_at') for r in rows)}
 @router.post('/notifications/read')
 def read_alerts(req:ReadRequest,user=Depends(current_user)):
-    for row in repo.list_for(user,'notification'):
-        if req.ids is None or row['id'] in req.ids:repo.put(user,'notification',{**row,'read_at':db.now()},row['id'])
+    for row in db.records('notices',user_id=user):
+        if req.ids is None or row['id'] in req.ids:db.update('notices',row['id'],{'read_at':db.now()},user_id=user)
     return {'ok':True}
 @router.get('/actions')
 def actions(user=Depends(current_user)):
-    with db.connect() as c:rows=[dict(r) for r in c.execute("SELECT * FROM actions WHERE user_id=? ORDER BY id DESC LIMIT 100",(user,))]
-    return {'actions':[{**r,'payload':json.loads(r['payload']),'result':json.loads(r['result']) if r['result'] else None} for r in rows]}
+    return {'actions':sorted(db.records('actions',user_id=user),key=lambda r:r['id'],reverse=True)[:100]}
 @router.post('/actions/{ident}/approve')
 async def approve(ident:int,user=Depends(current_user)):return await tools.approve(user,ident)
 @router.post('/actions/{ident}/deny')
 def deny(ident:int,user=Depends(current_user)):
-    with db.connect() as c:changed=c.execute("UPDATE actions SET status='denied',resolved_at=? WHERE id=? AND user_id=? AND status='pending'",(db.now(),ident,user)).rowcount
-    return {'ok':bool(changed)}
+    return {'ok':db.update('actions',ident,{'status':'denied','resolved_at':db.now()},user_id=user,status='pending')}
 @router.get('/analytics')
 def analytics(user=Depends(current_user)):
     runs=db.listing(user);return {'workflows':len(runs),'completed_tasks':sum(r['completed'] for r in runs),'failed_tasks':sum(s['status']=='failed' for r in runs for s in r['steps']),'worker':workflows.status()}

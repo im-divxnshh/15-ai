@@ -9,5 +9,5 @@ COPY backend/scripts ./scripts
 RUN mkdir -p /app/data && chown -R nova:nova /app
 USER nova
 EXPOSE 8000
-# One server process owns the elected background worker; persist /app/data.
+# Redis elects one worker across replicas; files and history use managed storage.
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
