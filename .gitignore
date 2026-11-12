@@ -1,7 +1,29 @@
-/backend/venv
-/backend/ .env
+# Private credentials and environment values
 .env
 .env.*
-*.env.bak*
+!.env.example
+*.env.local
+*-firebase-adminsdk-*.json
+service-account*.json
+*serviceAccount*.json
+# Dependencies and generated builds
+venv/
 .venv/
+node_modules/
+.next/
+__pycache__/
+*.py[cod]
+*.tsbuildinfo
+# Durable local application state
 backend/data/
+*.sqlite3
+*.sqlite3-*
+*.db
+*.db-*
+# Local logs and platform files
+*.log
+.DS_Store
+
+.progress.lock
+artifacts/
+coverage/

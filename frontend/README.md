@@ -1,36 +1,17 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# NOVA OS frontend
 
-## Getting Started
+Next.js 16, React 19, TypeScript and Firebase authentication. The homepage and `/office` show the public 2D cabin office; `/workspace` hosts authenticated work controls.
 
-First, run the development server:
+Open [office-preview.html](public/office-preview.html) directly in a browser to see the CEO cabin, fourteen specialists, agent details, themes, and the labelled assignment walking demo. It requires no backend or build. Select Friday and click **Preview assignment**.
 
 ```bash
+npm ci
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm run test:office
+npm run test:transport
+npm run test:office:browser
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+The browser check targets the standalone file and writes actual screenshots under ../artifacts/office when Chrome can run. Its latest launch failed before page checks. Live assignment event wiring remains unverified until the requested backend storage migration is complete.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
-
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+`npm run build` stays gated until all required live connection checks pass. Private credentials belong only in backend/.env; frontend/.env.local contains five public fields. See [the project README](../Readme.md), [env audit](../docs/ENV-AUDIT.md), and [PLAN.md](../PLAN.md).

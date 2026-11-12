@@ -19,13 +19,15 @@ load_dotenv(BASE_DIR / ".env")
 
 
 class Settings(BaseSettings):
-    # ---- LLM brain (GLM, OpenAI-compatible) ----
-    glm_api_key: str = ""
-    glm_base_url: str = "https://api.z.ai/api/paas/v4"
-    glm_model: str = "glm-4.6"
+    # ---- Groq is the only model provider ----
+    groq_api_key: str = ""
+    groq_base_url: str = "https://api.groq.com/openai/v1"
+    groq_model: str = "openai/gpt-oss-20b"
+    nova_llm_model: str = "openai/gpt-oss-120b"
+    default_agent_model: str = "openai/gpt-oss-20b"
 
     # ---- Embeddings ----
-    embeddings_provider: str = "local"  # glm | local
+    embeddings_provider: str = "local"  # local only
     embeddings_model: str = "embedding-3"
 
     # ---- Firebase ----
@@ -41,9 +43,6 @@ class Settings(BaseSettings):
     r2_secret_access_key: str = ""
     r2_bucket: str = ""
 
-    # ---- Free extras ----
-    groq_api_key: str = ""
-
     # ---- App ----
     host: str = "0.0.0.0"
     port: int = 8000
@@ -53,7 +52,7 @@ class Settings(BaseSettings):
     # ---- Derived flags ----
     @property
     def llm_ready(self) -> bool:
-        return bool(self.glm_api_key)
+        return bool(self.groq_api_key)
 
     @property
     def firebase_ready(self) -> bool:
@@ -69,7 +68,7 @@ class Settings(BaseSettings):
 
     @property
     def search_ready(self) -> bool:
-        return self.llm_ready  # web search is powered by the GLM brain
+        return self.llm_ready  # tool integration remains to be verified
 
     def firebase_credentials_dict(self) -> dict | None:
         """Parse the FIREBASE_CREDENTIALS env var (one-line JSON) into a dict."""

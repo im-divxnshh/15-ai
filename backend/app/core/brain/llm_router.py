@@ -1,7 +1,6 @@
-"""LLM Router — the single doorway to the GLM brain.
+"""LLM Router — the single doorway to the Groq brain.
 
-OpenAI-compatible client so it works with GLM (z.ai), agentrouter-style
-proxies, Groq, OpenAI, or any compatible endpoint via env vars.
+Groq is the only configured model provider.
 
 Resilience built in:
 - Some coding-tool proxies (e.g. agentrouter.org) content-block casual
@@ -96,16 +95,13 @@ class LLMRouter:
         self.client: AsyncOpenAI | None = None
         if settings.llm_ready:
             self.client = AsyncOpenAI(
-                api_key=settings.glm_api_key,
-                base_url=settings.glm_base_url,
-                # agentrouter-style proxies reject generic clients — identify as an approved CLI
-                default_headers={
-                    "User-Agent": "claude-cli/2.0.0 (external, cli)",
-                    "anthropic-version": "2023-06-01",
-                },
+                api_key=settings.groq_api_key,
+                base_url=settings.groq_base_url,
+                timeout=60.0,
+                max_retries=0,
             )
         else:
-            log.warning("No GLM_API_KEY set — brain will run in echo/fallback mode")
+            log.warning("No GROQ_API_KEY set — brain will run in echo/fallback mode")
 
     @property
     def ready(self) -> bool:
@@ -154,7 +150,7 @@ class LLMRouter:
         max_tokens: int,
     ) -> str:
         resp = await self.client.chat.completions.create(
-            model=model or settings.glm_model,
+            model=model or settings.groq_model,
             messages=messages,
             temperature=temperature,
             max_tokens=max_tokens,
@@ -206,8 +202,8 @@ def _offline_reply(messages: list[dict[str, str]]) -> str:
     """No API key configured — friendly Hinglish echo so the system still feels alive."""
     last_user = next((m["content"] for m in reversed(messages) if m["role"] == "user"), "")
     return (
-        "Boss, mera brain (GLM API) abhi configure nahi hua hai. 😅\n"
-        "backend/.env file mein `GLM_API_KEY` aur `GLM_BASE_URL` set karo, "
+        "Boss, mera brain (Groq API) abhi configure nahi hua hai. 😅\n"
+        "backend/.env file mein `GROQ_API_KEY` aur `GROQ_BASE_URL` set karo, "
         "phir main tumhari har baat samajh ke kaam karunga.\n\n"
         f"(Tumne kaha: \"{last_user[:120]}\")"
     )

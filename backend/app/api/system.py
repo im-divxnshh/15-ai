@@ -86,7 +86,7 @@ async def health() -> dict:
         "firebase": "ready" if isinstance(store, FirestoreStore) else "local_fallback",
         "neon": "ready" if isinstance(vector_store, NeonVectorStore) else "local_fallback",
         "r2": "ready" if settings.r2_ready else "local_fallback",
-        "search": "glm_brain" if settings.llm_ready else "unavailable",
+        "search": "groq_brain" if settings.llm_ready else "unavailable",
         "stt": "groq" if settings.groq_api_key else "browser_fallback",
     }
 

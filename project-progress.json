@@ -1,0 +1,301 @@
+{
+  "updated_at": "2026-11-12T04:21:10+00:00",
+  "current_step": "UI first: homepage now shows the connected 2D floor with NOVA CEO and 14 specialist cabins. Assignment walking demo and four-stage flow implemented; live event adapter uses actual agent-start events and stops offline. Five local office/transport tests and TypeScript passed. Browser launch failed; visual verification and backend storage migration remain pending.",
+  "tasks": [
+    {
+      "id": "inspection",
+      "title": "Inspect the current application and both original roadmaps",
+      "status": "complete",
+      "acceptance": "Reviewed the initial and replacement code, partial queue/workflow modules, Readme.md, 15-Ai.pdf and JARVIS Master Roadmap.pdf.",
+      "evidence": "Reviewed the initial and replacement code, partial queue/workflow modules, Readme.md, 15-Ai.pdf and JARVIS Master Roadmap.pdf."
+    },
+    {
+      "id": "env",
+      "title": "Prepare backend and frontend environment files",
+      "status": "complete",
+      "acceptance": "Updated backend/.env and frontend/.env.local plus both examples. Existing Groq/Firebase values preserved. Groq is the only model provider; SMTP receiving inbox is set; no service-account JSON path is needed. Connections are unverified.",
+      "evidence": "All 24 backend and five frontend env fields have values; references audited without exporting values. Five frontend fields are wired; nine backend storage fields still await migration. Values grouped and preserved."
+    },
+    {
+      "id": "progress",
+      "title": "Automatic plan and completion counts",
+      "status": "complete",
+      "acceptance": "Added project-progress.json and scripts/progress.py. PLAN.md regenerates from tracker changes; verification commands record pass/fail automatically.",
+      "evidence": "Added project-progress.json and scripts/progress.py. PLAN.md regenerates from tracker changes; verification commands record pass/fail automatically."
+    },
+    {
+      "id": "auth",
+      "title": "Authentication, user isolation and approval boundaries",
+      "status": "implemented",
+      "acceptance": "Protect every data endpoint; scope conversations, events, workflows and files to the authenticated user; keep backend credentials private; test cross-user access and approvals.",
+      "evidence": "Four focused configuration tests passed: no SQLite/worker on public roster or health; private endpoints require identity and reject pending storage; roster contract is public; Groq model keys select correctly. Live Firebase sign-in remains unverified.",
+      "previous_evidence": "APP_TOKEN authentication, scoped APIs/documents/files/events and owner-only system/approval boundaries passed backend tests. Live Firebase authentication is still unverified."
+    },
+    {
+      "id": "storage",
+      "title": "Firebase user data, memory and conversation persistence",
+      "status": "pending",
+      "acceptance": "Retain Firebase identity/project and user isolation; persist account data/history without SQLite; integrate Neon chunk retrieval.",
+      "evidence": "Previous code/evidence retained; integration and verification for Upstash Redis, Firebase, Neon chunk RAG and R2 remain.",
+      "previous_evidence": "SQLite history/profile/memory persistence, scoped legacy import, deletion durability, and old-thread/fact recall under a busy account passed. Memory uses keyword retrieval."
+    },
+    {
+      "id": "execution",
+      "title": "Provider calls, agent routing, collaboration and tools",
+      "status": "implemented",
+      "acceptance": "Use Groq only for routing, planning, specialist work and synthesis; remove fabricated provider success and duplicate chat/queue execution; enforce granted tools and report unavailable integrations.",
+      "evidence": "Previous code/evidence retained; integration and verification for Upstash Redis, Firebase, Neon chunk RAG and R2 remain.",
+      "previous_evidence": "Groq-only routing/planning/specialist tool loops/collaboration and provider failures passed local simulations. Actual Groq model access still needs the key and a successful real call."
+    },
+    {
+      "id": "queue",
+      "title": "Continuous backend task queue",
+      "status": "pending",
+      "acceptance": "Submit single work and new batches while busy; automatically start eligible tasks; wait when empty; continue with the browser closed.",
+      "evidence": "Previous code/evidence retained; integration and verification for Upstash Redis, Firebase, Neon chunk RAG and R2 remain.",
+      "previous_evidence": "The elected background worker completed chained work without browser requests; new-batch scheduling, FIFO eligibility and persistent idle waiting were exercised."
+    },
+    {
+      "id": "dependencies",
+      "title": "Sequential order and dependency results",
+      "status": "pending",
+      "acceptance": "Execute sequential tasks in order; gate dependants on successful prerequisites; pass earlier results as data; test failure propagation.",
+      "evidence": "Previous code/evidence retained; integration and verification for Upstash Redis, Firebase, Neon chunk RAG and R2 remain.",
+      "previous_evidence": "Sequential implicit chains and explicit parallel dependencies pass earlier recorded results; failed prerequisites skip dependants. Tests passed."
+    },
+    {
+      "id": "concurrency",
+      "title": "Parallel execution and concurrency limits",
+      "status": "pending",
+      "acceptance": "Run independent tasks concurrently with bounded limits; prevent shared state races; test overlapping users and batches.",
+      "evidence": "Previous code/evidence retained; integration and verification for Upstash Redis, Firebase, Neon chunk RAG and R2 remain.",
+      "previous_evidence": "Independent parallel work, bounded concurrency, joins, overlapping users and serialized shared-file indexing passed backend tests."
+    },
+    {
+      "id": "controls",
+      "title": "Pause, resume, cancel and explicit retry",
+      "status": "pending",
+      "acceptance": "Expose controls in API and UI; prevent late completion overwriting cancellation; preserve completed steps; never silently retry whole tasks.",
+      "evidence": "Previous code/evidence retained; integration and verification for Upstash Redis, Firebase, Neon chunk RAG and R2 remain.",
+      "previous_evidence": "Pause/resume/cancel, late outcome protection, explicit retry preserving completed work, and cancelled approval rejection passed."
+    },
+    {
+      "id": "recovery",
+      "title": "Restart recovery and duplicate-action protection",
+      "status": "pending",
+      "acceptance": "Persist workflow state, idempotent submissions, attempts and results; interrupted actions require review before retry; test recovery.",
+      "evidence": "Previous code/evidence retained; integration and verification for Upstash Redis, Firebase, Neon chunk RAG and R2 remain.",
+      "previous_evidence": "Restart marks in-flight tasks/actions/outbox interrupted; submissions are idempotent; whole tasks and ambiguous deliveries are not replayed automatically. Tests passed."
+    },
+    {
+      "id": "events",
+      "title": "Live event timeline with reconnect and replay",
+      "status": "pending",
+      "acceptance": "Persist actual routing, agent activity, tool calls and task outcomes; authenticated live feed recovers missed event IDs.",
+      "evidence": "Previous code/evidence retained; integration and verification for Upstash Redis, Firebase, Neon chunk RAG and R2 remain.",
+      "previous_evidence": "Persisted event cursor/replay and SSE frames passed backend checks; two client transport tests verify reconnect/auth/cursor/duplicate handling and visible errors. Visual timeline checks remain pending."
+    },
+    {
+      "id": "workflow-ui",
+      "title": "Workflow composer, editable NOVA plans and results",
+      "status": "implemented",
+      "acceptance": "Support one task, batches and natural-language plans; edit assignments and dependencies; show actual states, results and progress.",
+      "evidence": "Previous code/evidence retained; integration and verification for Upstash Redis, Firebase, Neon chunk RAG and R2 remain.",
+      "previous_evidence": "Application screen and controls implemented and production-compiled. Real desktop/mobile visual checks remain unverified because Chromium cannot run in this workspace."
+    },
+    {
+      "id": "design",
+      "title": "Premium responsive interface and persistent themes",
+      "status": "implemented",
+      "acceptance": "Readable typography, tasteful motion, loading/empty/offline/error states, functional controls, and persistent dark/light switch.",
+      "evidence": "Connected floor plan and compact cabin list; dark/light themes, furnished rooms and readable mobile scroll view implemented. TypeScript passes; browser visual verification is pending because Chrome closed before tests.",
+      "previous_evidence": "Application screen and controls implemented and production-compiled. Real desktop/mobile visual checks remain unverified because Chromium cannot run in this workspace."
+    },
+    {
+      "id": "office",
+      "title": "2D office with NOVA and fourteen robot specialists",
+      "status": "implemented",
+      "acceptance": "All fifteen visible cabins/desks/recognizable robots; real idle/working/failed status and current tasks; readable desktop and mobile office.",
+      "evidence": "15 private furnished cabins with NOVA CEO in the center. All 14 specialist paths reach CEO and return without crossing other rooms. Walking demo, cancellation, reduced motion and real event mapping passed local tests; live backend/browser verification remains.",
+      "previous_evidence": "Application screen and controls implemented and production-compiled. Real desktop/mobile visual checks remain unverified because Chromium cannot run in this workspace."
+    },
+    {
+      "id": "agent-ui",
+      "title": "Agent chat, capabilities and work details",
+      "status": "implemented",
+      "acceptance": "Cabin clicks open the matching agent conversation, real tools/capabilities, prior work and current task; avoid stale thread mix-ups.",
+      "evidence": "Cabins open capabilities; authenticated chat links target /workspace?agent=\u2026 . Public homepage and standalone preview work without backend credentials; actual chat/history await storage migration.",
+      "previous_evidence": "Application screen and controls implemented and production-compiled. Real desktop/mobile visual checks remain unverified because Chromium cannot run in this workspace."
+    },
+    {
+      "id": "files",
+      "title": "File intelligence and management",
+      "status": "pending",
+      "acceptance": "Use R2 for isolated file uploads/downloads/deletion; store chunk-based RAG data in Neon and enforce Firebase user ownership.",
+      "evidence": "Previous code/evidence retained; integration and verification for Upstash Redis, Firebase, Neon chunk RAG and R2 remain.",
+      "previous_evidence": "API upload/download/delete, text indexing, replacements, unsupported-format warnings, symlink/user isolation and parallel-write index consistency passed."
+    },
+    {
+      "id": "routines",
+      "title": "Tasks, routines, reminders and alerts",
+      "status": "pending",
+      "acceptance": "Finish dashboard controls; durable scheduling; route alerts through the outbox; avoid replaying failed routines without review.",
+      "evidence": "Previous code/evidence retained; integration and verification for Upstash Redis, Firebase, Neon chunk RAG and R2 remain.",
+      "previous_evidence": "To-do/reminder CRUD, durable scheduling, no overlapping routine runs, failed/interrupted review, manual run/toggle and alerts passed backend checks."
+    },
+    {
+      "id": "delivery",
+      "title": "Persistent notification outbox and preferences",
+      "status": "pending",
+      "acceptance": "Meaningful replies/results/failures/reminders/summaries; user preferences, delivery history, transient retries and explicit ambiguous-outcome states.",
+      "evidence": "Previous code/evidence retained; integration and verification for Upstash Redis, Firebase, Neon chunk RAG and R2 remain.",
+      "previous_evidence": "Local outbox/preferences/history, SMTP TLS submission simulation, bounded transient errors, blocked credentials, destination changes, partial Telegram/uncertain acknowledgements and restart handling passed. LIVE email/Telegram delivery remains unverified."
+    },
+    {
+      "id": "connections",
+      "title": "Email and Telegram setup screens and tests",
+      "status": "implemented",
+      "acceptance": "Use divyansh20060@gmail.com; BotFather/Start/chat-ID instructions; connection tests show success only after actual provider acceptance.",
+      "evidence": "Previous code/evidence retained; integration and verification for Upstash Redis, Firebase, Neon chunk RAG and R2 remain.",
+      "previous_evidence": "Application screen and controls implemented and production-compiled. Real desktop/mobile visual checks remain unverified because Chromium cannot run in this workspace. Email/Telegram connections also need actual credentialed tests."
+    },
+    {
+      "id": "backend-tests",
+      "title": "Backend execution and failure verification",
+      "status": "pending",
+      "acceptance": "Run tests for batching, dependencies, concurrency, controls, recovery, provider failures, delivery failures, ownership and permission handling.",
+      "verification_task": true,
+      "evidence": "31 tests passed for the earlier SQLite runtime. Redis/Firebase/Neon/R2 implementation needs an adapted suite; tests stopped during env setup.",
+      "previous_evidence": "Verification command passed."
+    },
+    {
+      "id": "frontend-build",
+      "title": "Frontend production build",
+      "status": "blocked",
+      "acceptance": "Fix framework/dependency mismatch and run a successful production build on the final application.",
+      "verification_task": true,
+      "evidence": "Builds stopped by user request until required keys are filled and actual connections pass. Previous compiled output is not verification of the new storage architecture.",
+      "previous_evidence": "Verification command passed."
+    },
+    {
+      "id": "browser-tests",
+      "title": "Desktop/mobile and both-theme browser verification",
+      "status": "blocked",
+      "acceptance": "Check all fifteen cabins, layout, theme persistence, task controls and loading/offline/error states at desktop and mobile sizes.",
+      "verification_task": true,
+      "evidence": "New standalone office browser runner attempted via file URL. Chrome closed before page checks (Target.setDiscoverTargets: Target closed); no visual pass or screenshots. TypeScript and local movement tests passed.",
+      "previous_evidence": "Browser runner is implemented; launch failed with Target.setDiscoverTargets: Target closed. Direct headless Chromium exited 133. No visual pass or screenshots claimed."
+    },
+    {
+      "id": "deployment",
+      "title": "README, API docs and continuous-operation deployment",
+      "status": "pending",
+      "acceptance": "Accurate startup instructions, API contract, persistent-volume deployment and restart configuration; report only genuinely remaining external setup.",
+      "evidence": "Office preview/startup documentation updated for /, /office and /workspace. Upstash/Firebase/Neon/R2 runtime and continuous deployment remain unverified.",
+      "previous_evidence": "README/env examples, authenticated OpenAPI/API docs, startup script and persistent supervised Compose configuration written; shell/YAML/contract checks passed. Docker build/start could not be run because Docker is unavailable."
+    },
+    {
+      "id": "upstash",
+      "title": "Upstash Redis primary execution/state/cache integration",
+      "status": "pending",
+      "acceptance": "Replace SQLite queues/events/outbox/state with durable Redis and atomic distributed claims; maintain dependency/cancellation/restart/approval guarantees; test ownership and no duplicate side effects."
+    },
+    {
+      "id": "rag",
+      "title": "Neon chunk-based RAG integration",
+      "status": "pending",
+      "acceptance": "Persist document chunks and pgvector retrieval in Neon with per-user access, provenance and truthful indexing failures; Groq remains the only AI provider."
+    },
+    {
+      "id": "connection-gate",
+      "title": "Required environment and live connection verification",
+      "status": "blocked",
+      "verification_task": true,
+      "acceptance": "After the user fills values, verify Groq, Firebase, Upstash Redis, Neon and R2 before builds. SMTP/Telegram delivery remains unverified until actual channel tests.",
+      "evidence": "0/6 required live connections passed. Telegram deferred by user and excluded from this gate. Remaining: groq, upstash, firebase, neon, r2, email. SMTP/Telegram message delivery and runtime integration are separate checks; see artifacts/connection-report.json.",
+      "last_check": {
+        "at": "2026-11-12T04:21:10.286055+00:00",
+        "exit_code": 1
+      }
+    }
+  ],
+  "phases": [
+    "Prepare all necessary grouped env fields; preserve values and wait for the user to fill credentials.",
+    "Verify required live connections only after env values are ready. Do not build while checks are missing or failing.",
+    "Implement Upstash Redis execution/state/cache, Firebase user data/history, Neon chunk RAG and R2 file storage; eliminate SQLite usage.",
+    "Integrate the UI and retest queue/dependencies/concurrency/recovery/approvals/provider failures and notifications on the new architecture.",
+    "Build and verify desktop/mobile themes after connection readiness; update API/startup/deployment docs with actual evidence."
+  ],
+  "setup": [
+    "All 24 backend and five frontend env fields have values; preserve them. Nine backend storage fields still await runtime migration.",
+    "Open frontend/public/office-preview.html directly for the 15-cabin office and assignment walking demo. No backend or production build is needed.",
+    "Homepage / and /office show the public office; /workspace hosts authenticated chat, tasks and workflow controls.",
+    "Live connection probes failed at workspace network/DNS access. Run scripts/check_connections.py from your terminal; production builds remain gated."
+  ],
+  "historical_verification": [
+    {
+      "task": "Backend execution and failure verification",
+      "check": {
+        "at": "2026-11-11T20:21:23+00:00",
+        "exit_code": 0
+      },
+      "scope": "Previous SQLite implementation; this does not verify the requested Redis/Firebase/Neon/R2 architecture."
+    },
+    {
+      "task": "Frontend production build",
+      "check": {
+        "at": "2026-11-11T20:23:40+00:00",
+        "exit_code": 0
+      },
+      "scope": "Previous SQLite implementation; this does not verify the requested Redis/Firebase/Neon/R2 architecture."
+    },
+    {
+      "task": "Desktop/mobile and both-theme browser verification",
+      "check": {
+        "at": "2026-11-11T20:08:42+00:00",
+        "exit_code": 1
+      },
+      "scope": "Previous SQLite implementation; this does not verify the requested Redis/Firebase/Neon/R2 architecture."
+    }
+  ],
+  "architecture": {
+    "primary_execution_store": "upstash_redis",
+    "user_data_and_identity": "firebase",
+    "rag": "neon_chunks_pgvector",
+    "files": "r2",
+    "ai": "groq_only",
+    "sqlite_allowed": false
+  },
+  "local_checks": [
+    {
+      "title": "Frontend TypeScript",
+      "exit_code": 0,
+      "at": "2026-11-11T21:46:35+00:00",
+      "scope": "Current office components and public/authenticated routes; not a production build."
+    },
+    {
+      "title": "Office movement and frontend transport tests",
+      "exit_code": 0,
+      "at": "2026-11-11T21:46:35+00:00",
+      "scope": "Five tests passed; path collisions, assignment phases, cancellation, reduced motion, event mapping and transport errors."
+    },
+    {
+      "title": "Standalone office rendering",
+      "exit_code": 0,
+      "at": "2026-11-11T21:46:35+00:00",
+      "scope": "15 cabins and walking-demo script rendered; no working activity fabricated."
+    },
+    {
+      "title": "Backend configuration boundaries",
+      "exit_code": 0,
+      "at": "2026-11-11T21:46:35+00:00",
+      "scope": "Four focused tests; public office roster, private endpoint gate and model env selection. Full runtime tests remain."
+    },
+    {
+      "title": "Standalone office browser verification",
+      "exit_code": 1,
+      "at": "2026-11-11T21:46:35+00:00",
+      "scope": "Chrome closed before page checks. No desktop/mobile visual pass or screenshots."
+    }
+  ]
+}

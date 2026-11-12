@@ -1,147 +1,82 @@
-# 15-AI — JARVIS Office 🧠
+# 15-AI / NOVA OS
 
-**"Build for comfort"** — a personal AI office of **15 agents** with one mission: handle your every work.
+NOVA is the CEO and orchestrator of a 15-robot office. The public homepage shows a connected 2D floor with fifteen private cabins, furnished desks, shared walkways, clickable agent details, and persistent dark/light themes. Voice work is deferred.
 
-Talk to it in **Hindi, English, or natural Hinglish** — it replies the way an Indian friend actually talks.
+## See the office now
 
-![layers](https://img.shields.io/badge/stack-100%25%20FREE-success)
+Open **frontend/public/office-preview.html** in your browser. It is standalone and needs no backend, credentials, build, or external assets. Choose Friday and click **Preview assignment**: the robot walks to NOVA, collects the brief, and returns to its cabin. A four-stage assignment flow follows the animation. Stop/replay controls are included. This is a labelled animation demo; it sends no AI tasks or notifications.
 
-## What is this?
+The floor plan scrolls to keep cabin text readable on smaller screens. Switch to **Cabin list** for a compact mobile view. Click any cabin for its role and configured capabilities.
 
-An isometric **2D cyberpunk office** where 15 AI workers (JARVIS + 14 agents) sit at their desks and work for you in real time. You chat (text or voice), JARVIS's brain classifies → plans → risk-checks → executes via agents/tools → answers with memory of everything.
-
-| Layer | Agents |
-|---|---|
-| 🧠 Supreme Control | **JARVIS** (orchestrates all) |
-| Intelligence | Friday · Drake · Stark · Athena |
-| Execution | Michel (CTO) · Oracle · Zeus |
-| Human Optimization | Kratos · Pepper · Gaya |
-| Communication | Veronica · Echo |
-| Lifestyle | Gecko · Elena |
-
-## Tech stack (all free tier)
-
-| Component | Service |
-|---|---|
-| Frontend | Next.js 16 + Tailwind 4 + Socket.IO client |
-| Backend | Python FastAPI + Socket.IO |
-| **LLM Brain** | **GLM** (OpenAI-compatible — bring your key) |
-| Primary DB | Firebase Firestore *(falls back to local JSON if unset)* |
-| Vector DB | Neon Postgres + pgvector *(falls back to in-memory if unset)* |
-| Embeddings | Free local embedder *(GLM embeddings optional)* |
-| File storage | Cloudflare R2 *(falls back to local disk if unset)* |
-| Web search | GLM brain (same key — no extra API) |
-| STT (voice → text) | Groq Whisper free tier |
-| TTS (text → voice) | Browser Web Speech API (hi-IN / en-IN) |
-
-> **Zero-config runs too**: with only `GLM_API_KEY` set, everything works locally with fallback stores.
-
-## Quick start
+If your browser needs an HTTP origin, run this from your own terminal:
 
 ```bash
-# 1. Backend
-cd backend
-python3 -m venv ../.venv && source ../.venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env        # then edit .env — set GLM_API_KEY + GLM_BASE_URL
-uvicorn main:app --reload   # http://localhost:8000 (docs at /docs)
+python3 -m http.server 3001 --bind 127.0.0.1 --directory frontend/public
+```
 
-# 2. Frontend (new terminal)
+Then open http://localhost:3001/office-preview.html. Refresh the standalone file after UI changes with `node scripts/render-office-preview.cjs`.
+
+## Current state
+
+**3/27 work items complete; 24 remaining.** [PLAN.md](PLAN.md) generates counts from project-progress.json. UI code is implemented; real browser visual verification remains pending because Chrome exits before page checks in this managed workspace.
+
+The previous application used SQLite. The requested Upstash/Firebase/Neon/R2 migration is **pending**, and SQLite fallback is disabled. The backend does not start the worker or accept private data operations until storage is implemented. Existing queue, workflow, outbox and tool modules need integration and retesting. Earlier test/build passes do not verify this new architecture.
+
+Intended stack: Next.js 16 / React 19 / TypeScript, FastAPI / Python, Groq only for AI, Firebase for authentication and user data, Upstash Redis for durable execution/state/cache, Neon PostgreSQL/pgvector for chunk-based RAG, Cloudflare R2 for files, and SMTP/Telegram for notifications.
+
+## Configuration and connection checks
+
+All 24 backend and five frontend fields have values; private values were preserved. [ENV-AUDIT.md](docs/ENV-AUDIT.md) lists actual code references and remaining storage integration. No private keys belong in the frontend. Firebase Admin credentials use inline JSON in backend/.env, with no credential-file path.
+
+```bash
+backend/venv/bin/python scripts/audit_env.py
+backend/venv/bin/python scripts/check_connections.py --offline
+backend/venv/bin/python scripts/check_connections.py
+```
+
+Offline validation cannot unlock builds. Live probes check Groq models, Firebase Admin/Auth, Upstash PING, Neon SELECT 1, R2 bucket access, SMTP TLS authentication and Telegram bot/chat lookup. They send no AI completion, email or Telegram message. Previous live probes failed at network/DNS access; credentials have not been verified or rejected. Actual notification delivery remains unverified.
+
+Production `npm run build` requires a current passing live connection report. Do not copy examples over filled env files. Restart the backend after private env changes; restart/rebuild the frontend after public env changes.
+
+## Application routes and local startup
+
+The frontend homepage `/` and `/office` show the public office. `/workspace` provides the Firebase-authenticated dashboard, agent chats and workflow controls. Public cabin previews expose no private history. When storage is available, office assignment movement consumes actual agent-start events, skips the initial historical snapshot, and stops on connection loss. Animation stages visualize the hand-off and do not represent execution progress.
+
+Use Python 3.12+, Node 22+, and npm. Dependencies are already present in this workspace; for a new checkout:
+
+```bash
+python3 -m venv backend/venv
+backend/venv/bin/python -m pip install -r backend/requirements.txt
 cd frontend
-npm install
-npm run dev                 # http://localhost:3000
+npm ci
 ```
 
-Open **http://localhost:3000** — the office loads, JARVIS sits in the glowing command pod, 14 workers at their desks.
+For frontend development from your own terminal:
 
-## Setup: the one required key
-
-```env
-GLM_API_KEY=your-key-here
-GLM_BASE_URL=https://api.z.ai/api/paas/v4   # or your custom endpoint
-GLM_MODEL=glm-4.6
-```
-
-## Optional free services (all have free tiers)
-
-### Firebase (Firestore) — persistent conversations/tasks across restarts
-1. console.firebase.google.com → create project (Spark/free plan)
-2. Project settings → Service accounts → generate private key JSON
-3. Put it in `.env` as ONE line:
 ```bash
-# macOS: python3 -c "import json;print(json.dumps(json.load(open('service-account.json'))))"
-FIREBASE_CREDENTIALS={"type": "service_account", ...}
-FIREBASE_PROJECT_ID=your-project-id
+cd frontend
+npm run dev
 ```
 
-### Neon (vector memory — "remember everything" semantic search)
-1. neon.tech → free account → create database
-2. Copy the connection string:
-```env
-NEON_URL=postgresql://user:pass@ep-xxx.neon.tech/neondb?sslmode=require
-```
-(pgvector extension + `memories` table are created automatically on first use.)
+Open http://localhost:3000. The office is visible without sign-in. The authenticated workspace requires your Firebase configuration and a connected backend.
 
-### Cloudflare R2 (file storage)
-1. dash.cloudflare.com → R2 → create bucket + API token
-```env
-R2_ACCOUNT_ID=your-account-id
-R2_ACCESS_KEY_ID=...
-R2_SECRET_ACCESS_KEY=...
-R2_BUCKET=15-ai
+```bash
+backend/venv/bin/python -m uvicorn main:app --app-dir backend --host 127.0.0.1 --port 8000 --workers 1
 ```
 
-### Groq (voice STT — free)
-```env
-GROQ_API_KEY=gsk_...
+Health and docs are available at `/api/health` and `/docs`. The API can expose the public roster and configuration while private operations return 503 for pending storage. This command currently does **not** enable continuous execution. Compose/Docker files are reference configurations awaiting migration and container verification; Docker is unavailable here.
+
+## Verification
+
+```bash
+cd frontend
+npm run test:office
+npm run test:transport
+node node_modules/typescript/bin/tsc --noEmit
+node ../scripts/render-office-preview.cjs
+npm run test:office:browser
 ```
 
-## How to use
+The three office tests verify all specialist paths reach the CEO and return without crossing other cabins, the animation/cancellation/reduced-motion lifecycle, and event-based movement without duplicate routing animations. Two transport tests cover SSE reconnect cursors/authentication and visible offline/validation errors. TypeScript and standalone rendering passed. The browser runner targets only the standalone file, checks desktop/mobile themes and interactions, and saves screenshots only after actual successful page checks. Chrome closed before these checks; no screenshots or visual pass are claimed.
 
-- **Chat**: type in the right panel — Hinglish/Hindi/English, whatever. JARVIS replies with voice (🔊 toggle).
-- **Voice**: 🎤 button, bol daalo — Whisper transcribes (Hindi + English mix).
-- **Direct agent chat**: click any worker's desk → chat goes straight to that agent (Drake for research, Kratos for gym motivation, Pepper for journaling...).
-- **Files**: 📎 upload a PDF/notes/code — it gets indexed into memory; then ask questions about it.
-- **Reminders/tasks**: "remind me kal 9 baje meeting hai" → task created, visible at `GET /api/tasks`.
-- **Live office**: workers glow + show ⚡ status bubbles when working; Mission Control feed (left) shows every event.
-
-## Architecture (maps to the JARVIS Master Roadmap — all 15 milestones ✅)
-
-```
-User → Chat/Voice
-        ↓
-   ┌─ BRAIN (M01) ─────────────────────────────┐
-   │ Classifier → Planner → Risk Engine         │
-   │ → Reasoner → Tools → Response Builder      │
-   └────────────┬───────────────────────────────┘
-                ↓
-   MEMORY (M02): Neon pgvector + Firestore + fallbacks
-                ↓
-   RUNTIME (M03/07/08): Orchestrator → Dispatcher →
-   Priority Task Queue → Task Executor
-                ↓
-   15 AGENTS (M15) + TOOLS (M09): web_search, memory,
-   create_task, save_memory  → Event Bus → Socket.IO
-                ↓
-   2D OFFICE UI: live desks, status bubbles, feed
-```
-
-## API quick reference
-
-| Endpoint | What |
-|---|---|
-| `POST /api/chat` | chat with JARVIS or a specific agent |
-| `GET /api/agents` | office roster + live status |
-| `GET/POST/PATCH /api/tasks` | your task list |
-| `GET /api/memory/search?q=` | search long-term memory |
-| `POST /api/files/upload` | upload + index a file |
-| `POST /api/voice/stt` | voice → text (Groq Whisper) |
-| `GET/POST /api/workflows` | automations (manual/phrase/schedule triggers) |
-| `GET /api/analytics` | office stats |
-| `GET /api/system/health` | which services are live |
-
-## Notes
-
-- `USER_NAME=Boss` in `.env` — agents call you by this.
-- Set `APP_TOKEN` in backend env to require `Authorization: <token>` on APIs.
-- Data without Firebase lives in `backend/data/*.json` — delete to reset.
+See [verification evidence](docs/VERIFICATION.md). The full backend/runtime suite must be adapted after storage migration. Run `python3 scripts/progress.py watch` to regenerate PLAN.md whenever the tracker changes. The active API contract is [docs/openapi.json](docs/openapi.json); implemented handlers remain storage-gated.

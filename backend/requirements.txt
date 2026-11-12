@@ -1,12 +1,11 @@
-fastapi
-uvicorn[standard]
-pydantic
-pydantic-settings
-python-dotenv
-openai>=1.40
-httpx
-python-socketio
-firebase-admin
-asyncpg
-pypdf
-boto3
+# Active NOVA runtime; legacy modules are not mounted by main.py.
+fastapi==0.141.1
+uvicorn[standard]==0.54.0
+pydantic==2.13.5
+python-dotenv==1.2.3
+httpx==0.28.1
+firebase-admin==7.7.0
+pypdf==6.19.0
+
+# Neon connection checks and upcoming PostgreSQL RAG adapter.
+psycopg[binary]==3.3.6

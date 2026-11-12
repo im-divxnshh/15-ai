@@ -1,76 +1,44 @@
-"""15-AI — JARVIS office backend entrypoint.
-
-Run:  uvicorn main:app --reload
-"""
-from __future__ import annotations
-
+"""NOVA OS: authenticated API and elected continuous worker on a persistent volume."""
 import logging
+import os
 from contextlib import asynccontextmanager
-
-import socketio
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.openapi.utils import get_openapi
+from app.core.runtime import workflows,jobstore as db
+from app.api.nova import router
 
-from app.config.settings import settings
-from app.core.events.bus import bus
-from app.core.runtime import lifecycle
+logging.basicConfig(level=logging.INFO)
+# Telegram authenticates in its URL path. Keep transport request URLs out of logs.
+logging.getLogger('httpx').setLevel(logging.WARNING)
+logging.getLogger('httpcore').setLevel(logging.WARNING)
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(name)s %(levelname)s %(message)s",
-)
-log = logging.getLogger("main")
-
-# ---- Socket.IO (async) -----------------------------------------------------
-sio = socketio.AsyncServer(cors_allowed_origins="*", async_mode="asgi")
-
-
-@sio.event
-async def connect(sid, environ):  # noqa: ANN001
-    log.info("office UI connected: %s", sid)
-    await sio.emit("office_event", {"event": "SystemEvent", "data": {"type": "client_connected", "sid": sid}})
-
-
-@sio.event
-async def disconnect(sid):  # noqa: ANN001
-    log.info("office UI disconnected: %s", sid)
-
-
-# ---- lifespan ---------------------------------------------------------------
 @asynccontextmanager
-async def lifespan(app: FastAPI):
-    await lifecycle.startup()
-    bus.attach_socketio(sio.emit)
-    log.info("✅ 15-AI office is OPEN — JARVIS + 14 agents online")
-    yield
-    await lifecycle.shutdown()
-    log.info("🔒 office closed")
+async def lifespan(app):
+    if db.storage_ready():workflows.start()
+    else:logging.getLogger('nova.startup').warning(db.storage_info()['reason'])
+    try:yield
+    finally:await workflows.stop()
 
+app=FastAPI(title='NOVA OS',version='3.0.0',description='One orchestrator, fourteen specialists. Durable execution and per-user results.',lifespan=lifespan)
+app.add_middleware(CORSMiddleware,allow_origins=[s.strip() for s in os.getenv('CORS_ORIGINS','http://localhost:3000').split(',') if s.strip()],allow_credentials=True,allow_methods=['*'],allow_headers=['*'])
+app.include_router(router)
+@app.exception_handler(db.StorageUnavailable)
+async def unavailable_storage(request,error):
+    from fastapi.responses import JSONResponse
+    return JSONResponse(status_code=503,content={'detail':str(error)})
+@app.get('/')
+def root():return {'service':'NOVA OS','version':'3.0.0','docs':'/docs'}
 
-api = FastAPI(title="15-AI — JARVIS Office", version="1.0.0", lifespan=lifespan)
-api.add_middleware(
-    CORSMiddleware,
-    allow_origins=[o.strip() for o in settings.cors_origins.split(",") if o.strip()],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+def contract():
+    if app.openapi_schema:return app.openapi_schema
+    schema=get_openapi(title=app.title,version=app.version,description=app.description,routes=app.routes)
+    schema['components']['securitySchemes']={'BearerAuth':{'type':'http','scheme':'bearer','description':'Firebase ID token or private APP_TOKEN'}}
+    for path,item in schema['paths'].items():
+        if path.startswith('/api/') and path not in ('/api/health','/api/system/health','/api/office/roster'):
+            for operation in item.values():
+                if isinstance(operation,dict):operation['security']=[{'BearerAuth':[]}]
+    app.openapi_schema=schema
+    return schema
 
-# ---- routes ---------------------------------------------------------------
-from app.api import agents, analytics, chat, memory, system, tasks  # noqa: E402
-
-api.include_router(chat.router)
-api.include_router(agents.router)
-api.include_router(tasks.router)
-api.include_router(memory.router)
-api.include_router(analytics.router)
-api.include_router(system.router)
-
-
-@api.get("/")
-async def root() -> dict:
-    return {"service": "15-AI office", "jarvis": "online", "docs": "/docs"}
-
-
-# ---- ASGI app (FastAPI + Socket.IO) ------------------------------------
-app = socketio.ASGIApp(sio, other_asgi_app=api, socketio_path="socket.io")
+app.openapi=contract

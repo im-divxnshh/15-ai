@@ -1,0 +1,15 @@
+.git
+**/.env
+**/.env.*
+**/node_modules
+**/.next
+**/venv
+**/.venv
+**/__pycache__
+backend/data
+**/*.log
+**/*.sqlite3*
+**/*firebase-adminsdk*.json
+**/service-account*.json
+artifacts
+*.pdf

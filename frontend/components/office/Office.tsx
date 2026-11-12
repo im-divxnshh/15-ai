@@ -222,9 +222,9 @@ export default function Office() {
                   ? "border-cyan-400/40 bg-cyan-400/10 text-cyan-300"
                   : "border-amber-400/40 bg-amber-400/10 text-amber-300"
               }`}
-              title="GLM brain status"
+              title="Groq brain status"
             >
-              🧠 {health.llm === "ready" ? "GLM" : "no key"}
+              🧠 {health.llm === "ready" ? "Groq" : "no key"}
             </span>
           )}
           {analytics && (
